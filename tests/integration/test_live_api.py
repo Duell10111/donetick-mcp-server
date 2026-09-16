@@ -40,7 +40,7 @@ from typing import List
 import httpx
 import pytest
 
-from donetick_mcp.client import DonetickClient
+from donetick_mcp.client import DonetickAuthError, DonetickClient
 from donetick_mcp.models import Chore, ChoreCreate, ChoreUpdate
 
 # Mark all tests in this module as live_api tests
@@ -94,6 +94,8 @@ class TestChoreCreation:
         assert retrieved is not None
         assert retrieved.id == created.id
         assert retrieved.name == created.name
+        # Donetick only reads nextDueDate (dueDate is sent as nextDueDate)
+        assert retrieved.nextDueDate is not None
 
     async def test_create_chore_with_frequency(
         self,
@@ -673,7 +675,7 @@ class TestChoreDeletion:
 class TestErrorHandling:
     """Test suite for error handling and edge cases."""
 
-    async def test_authentication_failure(self):
+    async def test_authentication_failure(self, live_config):
         """
         Test client behavior with invalid credentials.
 
@@ -684,24 +686,16 @@ class TestErrorHandling:
 
         This test creates a separate client with bad credentials.
         """
-        import httpx
-
         # Create client with invalid credentials
-        from donetick_mcp.config import Config
-
-        config = Config()
         bad_client = DonetickClient(
-            base_url=config.donetick_base_url,
+            base_url=live_config.donetick_base_url,
             username="invalid_user_12345",
             password="invalid_password_12345",
         )
 
-        # Attempt authentication should fail
-        with pytest.raises(httpx.HTTPStatusError) as exc_info:
-            await bad_client.ensure_authenticated()
-
-        # Verify it's an authentication error (401 or 403)
-        assert exc_info.value.response.status_code in [401, 403]
+        # Attempt authentication should fail with a clear error
+        with pytest.raises(DonetickAuthError):
+            await bad_client.login()
 
         # Cleanup
         await bad_client.close()
@@ -919,3 +913,66 @@ class TestFieldNameCasing:
         if created.frequencyMetadata:
             # The API should return camelCase field names
             assert isinstance(created.frequencyMetadata, dict)
+
+
+class TestThings:
+    """Test suite for things and thing-triggered chores against live API."""
+
+    async def test_thing_trigger_lifecycle(
+        self,
+        live_client: DonetickClient,
+        test_user_id: int,
+    ):
+        """
+        Test creating a thing, linking a trigger chore and triggering it.
+
+        Verifies:
+        - Things CRUD via /api/v1/things
+        - Chore trigger is created from thingTrigger
+        - Updating the chore keeps the trigger (Donetick drops it unless re-sent)
+        - Setting the thing state sets the chore due date
+        - Thing history is recorded
+
+        Cleans up the chore before the thing (Donetick refuses to delete linked things).
+        """
+        thing = await live_client.create_thing("MCP Test Washer", "boolean", True)
+        chore_id = None
+        try:
+            trigger = await live_client.build_thing_trigger(thing.id, False)
+            created = await live_client.create_chore(
+                ChoreCreate(
+                    name="Test Trigger Chore",
+                    frequencyType="trigger",
+                    thingTrigger=trigger,
+                    assignedTo=test_user_id,
+                    assignees=[{"userId": test_user_id}],
+                )
+            )
+            chore_id = created.id
+
+            assert created.thingChore is not None
+            assert created.thingChore["thingId"] == thing.id
+            assert created.nextDueDate is None
+
+            renamed = await live_client.update_chore(chore_id, ChoreUpdate(name="Test Trigger Chore 2"))
+            assert renamed.name == "Test Trigger Chore 2"
+            assert renamed.thingChore is not None, "update_chore must keep the thing trigger"
+
+            updated_thing, triggered = await live_client.set_thing_state(thing.id, state=False)
+            assert updated_thing.state == "false"
+            assert chore_id in triggered
+
+            triggered_chore = await live_client.get_chore(chore_id)
+            assert triggered_chore.nextDueDate is not None
+
+            history = await live_client.get_thing_history(thing.id)
+            assert any(entry.state == "false" for entry in history)
+        finally:
+            if chore_id is not None:
+                await live_client.delete_chore(chore_id)
+            await live_client.delete_thing(thing.id)
+
+    async def test_chore_history_last_days(self, live_client: DonetickClient):
+        """Test that history accepts the days parameter (Donetick's limit)."""
+        history = await live_client.get_all_chores_history(days=30, include_circle_members=True)
+        assert isinstance(history, list)

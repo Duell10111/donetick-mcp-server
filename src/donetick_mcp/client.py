@@ -7,12 +7,29 @@ import random
 import re
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import httpx
 
 from .config import config
-from .models import Chore, ChoreCreate, ChoreDetail, ChoreHistory, ChoreUpdate, CircleMember, Label, User, UserProfile
+from .models import (
+    NUMERIC_TRIGGER_CONDITIONS,
+    Chore,
+    ChoreCreate,
+    ChoreDetail,
+    ChoreHistory,
+    ChoreUpdate,
+    CircleMember,
+    Label,
+    Thing,
+    ThingCreate,
+    ThingHistory,
+    ThingTrigger,
+    User,
+    UserProfile,
+    normalize_datetime,
+    normalize_thing_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +71,26 @@ def _parse_token_expiry(value: Any) -> Optional[datetime]:
     if expiry.year <= 1:
         return None
     return expiry
+
+
+def evaluate_thing_trigger(trigger_state: str, condition: Optional[str], new_state: str) -> bool:
+    """Check whether a thing state matches a chore trigger (mirrors Donetick's EvaluateThingChore)."""
+    if not condition or condition == "eq":
+        return new_state == trigger_state
+    if condition == "neq":
+        return new_state != trigger_state
+    try:
+        new_value = int(new_state)
+        target_value = int(trigger_state)
+    except ValueError:
+        return False
+    comparisons = {
+        "gt": new_value > target_value,
+        "lt": new_value < target_value,
+        "gte": new_value >= target_value,
+        "lte": new_value <= target_value,
+    }
+    return comparisons.get(condition, new_state == trigger_state)
 
 
 class TokenBucket:
@@ -520,37 +557,9 @@ class DonetickClient:
         logger.info(f"Fetched created chore {created_chore.id}: {created_chore.name}")
         return created_chore
 
-    async def update_chore(self, chore_id: int, update: ChoreUpdate) -> Chore:
-        """
-        Update an existing chore.
-
-        Args:
-            chore_id: Chore ID to update
-            update: ChoreUpdate object with fields to update
-
-        Returns:
-            Updated Chore object
-
-        Note:
-            The Donetick API requires the full chore object for updates.
-            This method fetches the current chore, applies the updates,
-            and sends the complete object back to PUT /api/v1/chores/
-        """
-        logger.info(f"Updating chore {chore_id}")
-
-        # Fetch current chore to get full object
-        current_chore = await self.get_chore(chore_id)
-        if current_chore is None:
-            raise ValueError(f"Chore {chore_id} not found")
-
-        # Convert to dict and apply updates
-        chore_dict = current_chore.model_dump(exclude_none=True)
-
-        update_fields = update.model_dump(exclude_none=True)
-        chore_dict.update(update_fields)
-
-        # Ensure ID is in the payload
-        chore_dict["id"] = chore_id
+    def _chore_update_payload(self, chore: Chore) -> dict[str, Any]:
+        """Build a full chore payload for PUT /api/v1/chores/ from a fetched chore."""
+        chore_dict = chore.model_dump(exclude_none=True)
 
         # Remove server-generated metadata fields
         for field in FIELDS_TO_REMOVE:
@@ -561,6 +570,86 @@ class DonetickClient:
             for label in chore_dict["labelsV2"]:
                 if "created_by" in label and label["created_by"] is None:
                     label.pop("created_by")
+
+        # Donetick removes a chore's thing link on every edit and only re-creates it from
+        # "thingTrigger" in the request. Chores are read with "thingChore", so convert it.
+        thing_chore = chore_dict.pop("thingChore", None)
+        if thing_chore and thing_chore.get("thingId"):
+            chore_dict["thingTrigger"] = {
+                "thingID": thing_chore["thingId"],
+                "triggerState": thing_chore.get("triggerState", ""),
+                "condition": thing_chore.get("condition") or "eq",
+            }
+
+        return chore_dict
+
+    async def _put_chore(self, chore_id: int, chore_dict: dict[str, Any]) -> Chore:
+        """Send a full chore to PUT /api/v1/chores/ and return the updated chore."""
+        chore_dict["id"] = chore_id
+
+        # Log the final payload for debugging
+        logger.debug(f"Sending update payload: {json_lib.dumps(chore_dict, indent=2)}")
+
+        data = await self._request(
+            "PUT",
+            "/api/v1/chores/",
+            json=chore_dict,
+        )
+
+        # API returns {"message": "Chore updated successfully"} instead of the chore object
+        # Fetch the updated chore to return it
+        if "message" in data:
+            logger.info(f"Update API response: {data.get('message')}")
+            updated_chore = await self.get_chore(chore_id)
+            if updated_chore is None:
+                raise ValueError(f"Chore {chore_id} was updated but could not be retrieved")
+        else:
+            updated_chore = Chore(**data)
+        return updated_chore
+
+    async def update_chore(
+        self,
+        chore_id: int,
+        update: ChoreUpdate,
+        remove_thing_trigger: bool = False,
+    ) -> Chore:
+        """
+        Update an existing chore.
+
+        Args:
+            chore_id: Chore ID to update
+            update: ChoreUpdate object with fields to update
+            remove_thing_trigger: Remove the chore's thing trigger
+
+        Returns:
+            Updated Chore object
+
+        Note:
+            The Donetick API requires the full chore object for updates.
+            This method fetches the current chore, applies the updates,
+            and sends the complete object back to PUT /api/v1/chores/.
+            If only the due date changes, the dedicated due date endpoint is used,
+            which also records the change as "rescheduled" in the chore history.
+        """
+        logger.info(f"Updating chore {chore_id}")
+
+        # Fetch current chore to get full object
+        current_chore = await self.get_chore(chore_id)
+        if current_chore is None:
+            raise ValueError(f"Chore {chore_id} not found")
+
+        update_fields = update.model_dump(exclude_none=True)
+
+        if set(update_fields) == {"nextDueDate"} and not remove_thing_trigger:
+            return await self.update_chore_due_date(
+                chore_id, update_fields["nextDueDate"], current_chore=current_chore
+            )
+
+        # Convert to dict and apply updates
+        chore_dict = self._chore_update_payload(current_chore)
+        chore_dict.update(update_fields)
+        if remove_thing_trigger:
+            chore_dict.pop("thingTrigger", None)
 
         # IMPORTANT API CONSTRAINT: If assignedTo is set, it MUST be in the assignees array
         # The API validates this and returns 400 "Assigned to not found in assignees" if violated
@@ -573,10 +662,11 @@ class DonetickClient:
                 assignees = []
                 chore_dict["assignees"] = assignees
 
-            # Add assignedTo to assignees if not present
-            if assigned_to not in assignees:
+            # Add assignedTo to assignees if not present (assignees are {"userId": id} objects)
+            assignee_ids = {a.get("userId") for a in assignees if isinstance(a, dict)}
+            if assigned_to not in assignee_ids:
                 logger.info(f"Adding assignedTo ({assigned_to}) to assignees array to satisfy API constraint")
-                assignees.append(assigned_to)
+                assignees.append({"userId": assigned_to})
                 chore_dict["assignees"] = assignees
 
         # Validate and fix frequencyMetadata ONLY for days_of_the_week frequency type
@@ -628,26 +718,44 @@ class DonetickClient:
             else:
                 logger.info(f"Skipping frequencyMetadata validation for frequency type: {freq_type}")
 
-        # Log the final payload for debugging
-        logger.debug(f"Sending update payload: {json_lib.dumps(chore_dict, indent=2)}")
-
-        data = await self._request(
-            "PUT",
-            "/api/v1/chores/",
-            json=chore_dict,
-        )
-
-        # API returns {"message": "Chore added successfully"} instead of the chore object
-        # Fetch the updated chore to return it
-        if "message" in data:
-            logger.info(f"Update API response: {data.get('message')}")
-            updated_chore = await self.get_chore(chore_id)
-            if updated_chore is None:
-                raise ValueError(f"Chore {chore_id} was updated but could not be retrieved")
-        else:
-            updated_chore = Chore(**data)
+        updated_chore = await self._put_chore(chore_id, chore_dict)
 
         logger.info(f"Updated chore {chore_id}: {updated_chore.name}")
+        return updated_chore
+
+    async def update_chore_due_date(
+        self,
+        chore_id: int,
+        due_date: Optional[str],
+        current_chore: Optional[Chore] = None,
+    ) -> Chore:
+        """
+        Change a chore's next due date via PUT /api/v1/chores/{id}/dueDate.
+
+        Args:
+            chore_id: Chore ID to update
+            due_date: New due date (RFC3339 or YYYY-MM-DD), None to clear it
+            current_chore: Already fetched chore (avoids another request)
+
+        Returns:
+            Updated Chore object
+        """
+        if current_chore is None:
+            current_chore = await self.get_chore(chore_id)
+            if current_chore is None:
+                raise ValueError(f"Chore {chore_id} not found")
+
+        payload = {
+            "dueDate": normalize_datetime(due_date) if due_date else None,
+            # Optimistic locking: rejected if the chore changed since it was fetched
+            "updatedAt": current_chore.updatedAt,
+        }
+        logger.info(f"Updating chore {chore_id} due date to {payload['dueDate']}")
+        await self._request("PUT", f"/api/v1/chores/{chore_id}/dueDate", json=payload)
+
+        updated_chore = await self.get_chore(chore_id)
+        if updated_chore is None:
+            raise ValueError(f"Chore {chore_id} was updated but could not be retrieved")
         return updated_chore
 
     async def delete_chore(self, chore_id: int) -> bool:
@@ -671,27 +779,36 @@ class DonetickClient:
         self,
         chore_id: int,
         completed_by: Optional[int] = None,
+        notes: Optional[str] = None,
+        completed_at: Optional[str] = None,
     ) -> Chore:
         """
         Mark a chore as complete.
 
         Args:
             chore_id: Chore ID to complete
-            completed_by: User ID who completed the chore (optional)
+            completed_by: User ID who completed the chore (circle admins only)
+            notes: Completion note
+            completed_at: Completion time (RFC3339 or YYYY-MM-DD), defaults to now
 
         Returns:
-            Updated Chore object
+            Updated Chore object (pending approval if the chore requires approval)
         """
         logger.info(f"Completing chore {chore_id}")
 
-        params = {}
+        # Donetick binds the body as JSON and rejects an empty body
+        payload: dict[str, Any] = {}
         if completed_by is not None:
-            params["completedBy"] = completed_by
+            payload["completedBy"] = completed_by
+        if notes:
+            payload["notes"] = notes
+        if completed_at:
+            payload["completedTime"] = normalize_datetime(completed_at)
 
         data = await self._request(
             "POST",
             f"/api/v1/chores/{chore_id}/do",
-            params=params,
+            json=payload,
         )
 
         # Handle both direct object and wrapped response
@@ -699,7 +816,7 @@ class DonetickClient:
             data = data["res"]
 
         completed_chore = Chore(**data)
-        logger.info(f"Completed chore {chore_id}: {completed_chore.name}")
+        logger.info(f"Completed chore {chore_id}")
         return completed_chore
 
     async def update_chore_priority(self, chore_id: int, priority: int) -> Chore:
@@ -726,11 +843,13 @@ class DonetickClient:
             json={"priority": priority},
         )
 
-        # Handle both direct object and wrapped response
+        # API returns {"message": "Priority updated successfully"}; older versions returned the chore
         if isinstance(data, dict) and "res" in data:
-            data = data["res"]
-
-        updated_chore = Chore(**data)
+            updated_chore = Chore(**data["res"])
+        else:
+            updated_chore = await self.get_chore(chore_id)
+            if updated_chore is None:
+                raise ValueError(f"Chore {chore_id} was updated but could not be retrieved")
         logger.info(f"Updated chore {chore_id} priority: {priority}")
         return updated_chore
 
@@ -757,8 +876,7 @@ class DonetickClient:
             raise ValueError(f"Chore {chore_id} not found")
 
         # Convert to dict and update assignee fields
-        chore_dict = current_chore.model_dump(exclude_none=True)
-        chore_dict["id"] = chore_id
+        chore_dict = self._chore_update_payload(current_chore)
         chore_dict["assignedTo"] = user_id
         chore_dict["assignees"] = [{"userId": user_id}]
 
@@ -766,32 +884,7 @@ class DonetickClient:
         if not chore_dict.get("assignStrategy"):
             chore_dict["assignStrategy"] = "least_completed"
 
-        # Remove server-generated metadata fields
-        for field in FIELDS_TO_REMOVE:
-            chore_dict.pop(field, None)
-
-        # Clean up labels - remove created_by if null
-        if "labelsV2" in chore_dict and chore_dict["labelsV2"]:
-            for label in chore_dict["labelsV2"]:
-                if "created_by" in label and label["created_by"] is None:
-                    label.pop("created_by")
-
-        # Send update
-        data = await self._request(
-            "PUT",
-            "/api/v1/chores/",
-            json=chore_dict,
-        )
-
-        # API returns {"message": "Chore added successfully"} instead of the chore object
-        # Fetch the updated chore to return it
-        if "message" in data:
-            logger.info(f"Update API response: {data.get('message')}")
-            updated_chore = await self.get_chore(chore_id)
-            if updated_chore is None:
-                raise ValueError(f"Chore {chore_id} was updated but could not be retrieved")
-        else:
-            updated_chore = Chore(**data)
+        updated_chore = await self._put_chore(chore_id, chore_dict)
 
         logger.info(f"Reassigned chore {chore_id} to user {user_id}")
         return updated_chore
@@ -848,33 +941,23 @@ class DonetickClient:
         """
         logger.info(f"Updating subtask {subtask_id} on chore {chore_id} to completed={completed}")
 
-        # First, fetch the current chore to get all subtasks
         chore = await self.get_chore(chore_id)
-
-        # Find and update the target subtask
-        updated = False
-        for subtask in chore.subTasks:
-            if subtask.get('id') == subtask_id:
-                if completed:
-                    # Mark as completed with current timestamp
-                    from datetime import datetime, timezone
-                    subtask['completedAt'] = datetime.now(timezone.utc).isoformat()
-                    # Note: completedBy would ideally be set to current user ID
-                    # but we don't track that in the client currently
-                else:
-                    # Mark as incomplete
-                    subtask['completedAt'] = None
-                    subtask['completedBy'] = 0
-                updated = True
-                break
-
-        if not updated:
+        if chore is None:
+            raise ValueError(f"Chore {chore_id} not found")
+        if not any(subtask.get("id") == subtask_id for subtask in chore.subTasks):
             raise ValueError(f"Subtask {subtask_id} not found in chore {chore_id}")
 
-        # Update the chore with modified subtasks
-        from .models import ChoreUpdate
-        update = ChoreUpdate(subTasks=chore.subTasks)
-        updated_chore = await self.update_chore(chore_id, update)
+        # Dedicated endpoint: sets completedBy to the current user and only touches this subtask
+        completed_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if completed else None
+        await self._request(
+            "PUT",
+            f"/api/v1/chores/{chore_id}/subtask",
+            json={"id": subtask_id, "choreId": chore_id, "completedAt": completed_at},
+        )
+
+        updated_chore = await self.get_chore(chore_id)
+        if updated_chore is None:
+            raise ValueError(f"Chore {chore_id} was updated but could not be retrieved")
 
         logger.info(f"Updated subtask {subtask_id} completion status")
         return updated_chore
@@ -912,16 +995,17 @@ class DonetickClient:
         logger.info(f"Retrieved {len(history)} history entries for chore {chore_id}")
         return history
 
-    async def get_all_chores_history(self, limit: int = 50, offset: int = 0) -> list[ChoreHistory]:
+    async def get_all_chores_history(
+        self,
+        days: int = 7,
+        include_circle_members: bool = False,
+    ) -> list[ChoreHistory]:
         """
-        Get completion history for all chores with pagination.
-
-        Returns completion records across all chores in the circle,
-        supporting pagination through limit and offset parameters.
+        Get chore history entries of the last days.
 
         Args:
-            limit: Maximum number of history entries to return (default: 50)
-            offset: Number of entries to skip for pagination (default: 0)
+            days: Number of days to look back (Donetick's "limit" parameter, default: 7)
+            include_circle_members: Include entries of all circle members, not only your own
 
         Returns:
             List of ChoreHistory objects
@@ -929,9 +1013,11 @@ class DonetickClient:
         Raises:
             httpx.HTTPStatusError: On API errors
         """
-        logger.info(f"Fetching all chores history (limit={limit}, offset={offset})")
+        logger.info(f"Fetching chores history (days={days}, members={include_circle_members})")
 
-        params = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {"limit": days}
+        if include_circle_members:
+            params["members"] = "true"
         data = await self._request("GET", "/api/v1/chores/history", params=params)
 
         # API may return either direct array or wrapped response {'res': [...]}
@@ -944,7 +1030,7 @@ class DonetickClient:
         # Parse response into ChoreHistory objects
         history = [ChoreHistory(**entry_data) for entry_data in history_list]
 
-        logger.info(f"Retrieved {len(history)} history entries (limit={limit}, offset={offset})")
+        logger.info(f"Retrieved {len(history)} history entries")
         return history
 
     async def get_chore_details(self, chore_id: int) -> ChoreDetail:
@@ -973,6 +1059,194 @@ class DonetickClient:
         chore_detail = ChoreDetail(**detail_data)
         logger.info(f"Retrieved details for chore {chore_id}: {chore_detail.name}")
         return chore_detail
+
+    # ==================== THINGS ====================
+
+    async def list_things(self) -> list[Thing]:
+        """
+        List all things of the current user.
+
+        Things are private to their owner, not shared with the circle.
+
+        Returns:
+            List of Thing objects
+        """
+        logger.info("Fetching things")
+        data = await self._request("GET", "/api/v1/things")
+        things_data = data.get("res", []) if isinstance(data, dict) else data
+        things = [Thing(**thing) for thing in things_data or []]
+        logger.info(f"Retrieved {len(things)} things")
+        return things
+
+    async def get_thing(self, thing_id: int) -> Thing:
+        """
+        Get a thing of the current user by ID.
+
+        The full API has no single-thing endpoint, so this filters list_things().
+
+        Raises:
+            ValueError: If the thing does not exist or belongs to another user
+        """
+        for thing in await self.list_things():
+            if thing.id == thing_id:
+                return thing
+        raise ValueError(
+            f"Thing {thing_id} not found. Things are private to their owner; "
+            "use list_things to see your things."
+        )
+
+    async def create_thing(self, name: str, thing_type: str, state: Any = None) -> Thing:
+        """
+        Create a thing.
+
+        Args:
+            name: Thing name
+            thing_type: text, number or boolean
+            state: Initial state (validated against the type)
+
+        Returns:
+            Created Thing object
+        """
+        thing = ThingCreate(name=name, type=thing_type, state=state)
+        logger.info(f"Creating thing: {thing.name}")
+        data = await self._request("POST", "/api/v1/things", json=thing.model_dump(exclude_none=True))
+        thing_data = data.get("res", data) if isinstance(data, dict) else data
+        return Thing(**thing_data)
+
+    async def update_thing(
+        self,
+        thing_id: int,
+        name: Optional[str] = None,
+        thing_type: Optional[str] = None,
+        state: Any = None,
+    ) -> Thing:
+        """
+        Update a thing's name, type and/or state.
+
+        Changing only the state this way does not trigger chores; use set_thing_state.
+
+        Returns:
+            Updated Thing object
+        """
+        current = await self.get_thing(thing_id)
+        new_type = thing_type or current.type
+        if state is None and new_type != current.type:
+            # Donetick keeps the old state, which must still be valid for the new type
+            state = current.state
+        thing = ThingCreate(name=name or current.name, type=new_type, state=state)
+
+        payload = {"id": thing_id, **thing.model_dump(exclude_none=True)}
+        logger.info(f"Updating thing {thing_id}")
+        data = await self._request("PUT", "/api/v1/things", json=payload)
+        thing_data = data.get("res", data) if isinstance(data, dict) else data
+        return Thing(**thing_data)
+
+    async def set_thing_state(
+        self,
+        thing_id: int,
+        state: Any = None,
+        increment: Optional[int] = None,
+    ) -> tuple[Thing, list[int]]:
+        """
+        Set a thing's state, which evaluates the triggers of linked chores.
+
+        Args:
+            thing_id: Thing ID
+            state: New state (validated against the thing type)
+            increment: Add this value to the current state (number things only)
+
+        Returns:
+            Tuple of the updated Thing and the IDs of chores whose trigger matched
+            (Donetick sets their due date to now if they have none)
+        """
+        if (state is None) == (increment is None):
+            raise ValueError("Provide exactly one of state or increment")
+
+        # Also guards against a Donetick crash on unknown thing IDs
+        thing = await self.get_thing(thing_id)
+
+        if increment is not None:
+            if thing.type != "number":
+                raise ValueError(f"increment only works for number things, thing {thing_id} is {thing.type}")
+            current = int(normalize_thing_state("number", thing.state or "0"))
+            state = current + increment
+        new_state = normalize_thing_state(thing.type, state)
+
+        logger.info(f"Setting thing {thing_id} state to {new_state}")
+        data = await self._request(
+            "PUT", f"/api/v1/things/{thing_id}/state", params={"value": new_state}
+        )
+        thing_data = data.get("res", data) if isinstance(data, dict) else data
+        updated_thing = Thing(**{**thing.model_dump(), **thing_data})
+
+        # Only this response includes the linked chores (the list endpoint does not preload them)
+        triggered = [
+            link.choreId
+            for link in updated_thing.thingChores or []
+            if evaluate_thing_trigger(link.triggerState, link.condition, new_state)
+        ]
+        return updated_thing, triggered
+
+    async def get_thing_history(self, thing_id: int, offset: int = 0) -> list[ThingHistory]:
+        """
+        Get the state history of a thing.
+
+        Args:
+            thing_id: Thing ID
+            offset: Number of entries to skip (Donetick requires this parameter)
+
+        Returns:
+            List of ThingHistory objects, newest first (Donetick returns 10 per page)
+        """
+        logger.info(f"Fetching history for thing {thing_id} (offset={offset})")
+        data = await self._request(
+            "GET", f"/api/v1/things/{thing_id}/history", params={"offset": offset}
+        )
+        history_data = data.get("res", []) if isinstance(data, dict) else data
+        return [ThingHistory(**entry) for entry in history_data or []]
+
+    async def delete_thing(self, thing_id: int) -> bool:
+        """
+        Delete a thing.
+
+        Raises:
+            ValueError: If chores are still triggered by the thing
+        """
+        logger.info(f"Deleting thing {thing_id}")
+        try:
+            await self._request("DELETE", f"/api/v1/things/{thing_id}")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 405:
+                raise ValueError(
+                    f"Thing {thing_id} still triggers chores. Remove the thing trigger from "
+                    "those chores (update_chore with remove_thing_trigger) before deleting it."
+                ) from e
+            raise
+        return True
+
+    async def build_thing_trigger(
+        self,
+        thing_id: int,
+        trigger_state: Any,
+        condition: Optional[str] = None,
+    ) -> ThingTrigger:
+        """
+        Validate a chore trigger against the thing and build the thingTrigger payload.
+
+        Validating up front matters: Donetick creates the chore before linking the thing,
+        so an invalid thing leaves a chore without trigger behind.
+        """
+        thing = await self.get_thing(thing_id)
+        condition = condition or "eq"
+        if condition in NUMERIC_TRIGGER_CONDITIONS and thing.type != "number":
+            raise ValueError(
+                f'Condition "{condition}" only works for number things, thing {thing_id} is {thing.type}'
+            )
+        return ThingTrigger(
+            thingID=thing_id,
+            triggerState=normalize_thing_state(thing.type, trigger_state),
+            condition=condition,
+        )
 
     async def get_circle_members(self) -> list[CircleMember]:
         """
