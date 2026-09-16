@@ -5,7 +5,6 @@ import json
 import pytest
 from pytest_httpx import HTTPXMock
 
-from donetick_mcp import server
 from donetick_mcp.client import DonetickClient
 from donetick_mcp.models import ChoreCreate, ChoreDetail, ChoreHistory, ChoreUpdate
 
@@ -52,18 +51,6 @@ def login(httpx_mock: HTTPXMock):
     httpx_mock.add_response(
         url=f"{BASE_URL}/api/v1/auth/login", method="POST", json={"token": "jwt"}
     )
-
-
-@pytest.fixture
-async def server_client(monkeypatch, httpx_mock: HTTPXMock):
-    """Fresh global client for MCP tool calls, independent of other server tests."""
-    httpx_mock.add_response(
-        url=f"{BASE_URL}/api/v1/auth/login", method="POST", json={"token": "jwt"}, is_optional=True
-    )
-    fresh_client = DonetickClient(rate_limit_per_second=100.0, rate_limit_burst=100)
-    monkeypatch.setattr(server, "client", fresh_client)
-    yield fresh_client
-    await fresh_client.close()
 
 
 def _put_payload(httpx_mock: HTTPXMock) -> dict:
@@ -201,12 +188,12 @@ class TestChoreActions:
         assert request.headers["Content-Type"] == "application/json"
         assert request.url.params.get("completedBy") is None
 
-    async def test_complete_pending_approval_message(self, server_client, httpx_mock: HTTPXMock):
+    async def test_complete_pending_approval_message(self, call_tool, httpx_mock: HTTPXMock):
         httpx_mock.add_response(
             url=f"{CHORE_URL}/do", method="POST", json={"res": {**CHORE, "status": 3}}
         )
 
-        result = await server.call_tool("complete_chore", {"chore_id": 1})
+        result = await call_tool("complete_chore", {"chore_id": 1})
 
         assert "pending approval" in result[0].text
 
@@ -234,11 +221,11 @@ class TestChoreActions:
 class TestCreateChoreTool:
     """create_chore tool payloads."""
 
-    async def test_date_only_due_date_uses_timezone(self, server_client, httpx_mock: HTTPXMock):
+    async def test_date_only_due_date_uses_timezone(self, call_tool, httpx_mock: HTTPXMock):
         httpx_mock.add_response(url=CHORES_URL, method="POST", json={"res": 1})
         httpx_mock.add_response(url=CHORE_URL, json={"res": CHORE})
 
-        result = await server.call_tool(
+        result = await call_tool(
             "create_chore",
             {"name": "Dentist", "due_date": "2026-09-20", "timezone": "Europe/Berlin"},
         )
@@ -249,8 +236,8 @@ class TestCreateChoreTool:
         assert payload["nextDueDate"] == "2026-09-20T10:00:00Z"
         assert payload["priority"] == 0
 
-    async def test_invalid_due_date(self, server_client, httpx_mock: HTTPXMock):
-        result = await server.call_tool("create_chore", {"name": "Dentist", "due_date": "20.09.2026"})
+    async def test_invalid_due_date(self, call_tool, httpx_mock: HTTPXMock):
+        result = await call_tool("create_chore", {"name": "Dentist", "due_date": "20.09.2026"})
 
         assert "Validation Error" in result[0].text
         assert httpx_mock.get_request(url=CHORES_URL, method="POST") is None
@@ -259,12 +246,12 @@ class TestCreateChoreTool:
 class TestHistoryTool:
     """get_all_chores_history parameters."""
 
-    async def test_days_and_members(self, server_client, httpx_mock: HTTPXMock):
+    async def test_days_and_members(self, call_tool, httpx_mock: HTTPXMock):
         httpx_mock.add_response(
             url=f"{BASE_URL}/api/v1/chores/history?limit=30&members=true", json={"res": []}
         )
 
-        result = await server.call_tool(
+        result = await call_tool(
             "get_all_chores_history", {"days": 30, "include_circle_members": True}
         )
 

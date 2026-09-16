@@ -5,7 +5,6 @@ import json
 import pytest
 from pytest_httpx import HTTPXMock
 
-from donetick_mcp import server
 from donetick_mcp.client import DonetickClient, evaluate_thing_trigger
 from donetick_mcp.models import ThingCreate, normalize_thing_state
 
@@ -44,15 +43,6 @@ def login(httpx_mock: HTTPXMock):
     httpx_mock.add_response(
         url=f"{BASE_URL}/api/v1/auth/login", method="POST", json={"token": "jwt"}, is_optional=True
     )
-
-
-@pytest.fixture
-async def server_client(monkeypatch, login):
-    """Fresh global client for MCP tool calls, independent of other server tests."""
-    fresh_client = DonetickClient(rate_limit_per_second=100.0, rate_limit_burst=100)
-    monkeypatch.setattr(server, "client", fresh_client)
-    yield fresh_client
-    await fresh_client.close()
 
 
 def _mock_things(httpx_mock: HTTPXMock, *things):
@@ -266,7 +256,7 @@ class TestThingsClient:
 class TestThingTools:
     """MCP tools for things and thing-triggered chores."""
 
-    async def test_create_trigger_chore(self, server_client, httpx_mock: HTTPXMock):
+    async def test_create_trigger_chore(self, call_tool, httpx_mock: HTTPXMock):
         _mock_things(httpx_mock, WASHER)
         httpx_mock.add_response(url=CHORES_URL, method="POST", json={"res": 42})
         httpx_mock.add_response(
@@ -286,7 +276,7 @@ class TestThingTools:
             },
         )
 
-        result = await server.call_tool(
+        result = await call_tool(
             "create_chore",
             {"name": "Empty washing machine", "thing_id": 3, "thing_trigger_state": False},
         )
@@ -298,23 +288,23 @@ class TestThingTools:
         # Trigger chores get their due date from the thing
         assert "nextDueDate" not in payload
 
-    async def test_create_trigger_chore_requires_state(self, server_client, httpx_mock: HTTPXMock):
-        result = await server.call_tool("create_chore", {"name": "Empty washer", "thing_id": 3})
+    async def test_create_trigger_chore_requires_state(self, call_tool, httpx_mock: HTTPXMock):
+        result = await call_tool("create_chore", {"name": "Empty washer", "thing_id": 3})
 
         assert "thing_trigger_state is required" in result[0].text
         assert httpx_mock.get_request(url=CHORES_URL, method="POST") is None
 
-    async def test_create_trigger_chore_unknown_thing(self, server_client, httpx_mock: HTTPXMock):
+    async def test_create_trigger_chore_unknown_thing(self, call_tool, httpx_mock: HTTPXMock):
         _mock_things(httpx_mock, WASHER)
 
-        result = await server.call_tool(
+        result = await call_tool(
             "create_chore", {"name": "Empty washer", "thing_id": 99, "thing_trigger_state": "false"}
         )
 
         assert "Thing 99 not found" in result[0].text
         assert httpx_mock.get_request(url=CHORES_URL, method="POST") is None
 
-    async def test_set_thing_state_tool(self, server_client, httpx_mock: HTTPXMock):
+    async def test_set_thing_state_tool(self, call_tool, httpx_mock: HTTPXMock):
         _mock_things(httpx_mock, COUNTER)
         httpx_mock.add_response(
             url=f"{THINGS_URL}/4/state?value=10",
@@ -330,24 +320,24 @@ class TestThingTools:
             },
         )
 
-        result = await server.call_tool("set_thing_state", {"thing_id": 4, "state": 10})
+        result = await call_tool("set_thing_state", {"thing_id": 4, "state": 10})
 
         assert "to '10'" in result[0].text
         assert "Triggered chores: 7" in result[0].text
 
-    async def test_list_things_tool(self, server_client, httpx_mock: HTTPXMock):
+    async def test_list_things_tool(self, call_tool, httpx_mock: HTTPXMock):
         _mock_things(httpx_mock, WASHER)
 
-        result = await server.call_tool("list_things", {})
+        result = await call_tool("list_things", {})
 
         data = json.loads(result[0].text)
         assert data["count"] == 1
         assert data["things"][0]["name"] == "Washing machine running"
 
     async def test_update_chore_with_thing_and_remove_conflict(
-        self, server_client, httpx_mock: HTTPXMock
+        self, call_tool, httpx_mock: HTTPXMock
     ):
-        result = await server.call_tool(
+        result = await call_tool(
             "update_chore",
             {"chore_id": 1, "thing_id": 3, "thing_trigger_state": "true", "remove_thing_trigger": True},
         )
