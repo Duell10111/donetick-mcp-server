@@ -5,7 +5,6 @@ import json
 import pytest
 from pytest_httpx import HTTPXMock
 
-from donetick_mcp import server
 from donetick_mcp.client import DonetickClient
 
 BASE_URL = "https://donetick.test"
@@ -45,15 +44,6 @@ def login(httpx_mock: HTTPXMock):
     httpx_mock.add_response(
         url=f"{BASE_URL}/api/v1/auth/login", method="POST", json={"token": "jwt"}, is_optional=True
     )
-
-
-@pytest.fixture
-async def server_client(monkeypatch, login):
-    """Fresh global client for MCP tool calls, independent of other server tests."""
-    fresh_client = DonetickClient(rate_limit_per_second=100.0, rate_limit_burst=100)
-    monkeypatch.setattr(server, "client", fresh_client)
-    yield fresh_client
-    await fresh_client.close()
 
 
 class TestArchive:
@@ -97,7 +87,7 @@ class TestArchive:
 
         assert [c.id for c in chores] == [1]
 
-    async def test_unarchive_tool(self, server_client, httpx_mock: HTTPXMock):
+    async def test_unarchive_tool(self, call_tool, httpx_mock: HTTPXMock):
         httpx_mock.add_response(
             url=f"{CHORE_URL}/unarchive",
             method="PUT",
@@ -105,7 +95,7 @@ class TestArchive:
         )
         httpx_mock.add_response(url=CHORE_URL, json={"res": CHORE})
 
-        result = await server.call_tool("unarchive_chore", {"chore_id": 1})
+        result = await call_tool("unarchive_chore", {"chore_id": 1})
 
         assert "Successfully unarchived chore 'Vacuum'" in result[0].text
 
@@ -126,7 +116,7 @@ class TestUndoAndApproval:
         assert message == "Successfully undid completion action"
         assert chore.nextDueDate == "2026-09-20T12:00:00Z"
 
-    async def test_undo_too_late_shows_api_error(self, server_client, httpx_mock: HTTPXMock):
+    async def test_undo_too_late_shows_api_error(self, call_tool, httpx_mock: HTTPXMock):
         httpx_mock.add_response(
             url=f"{CHORE_URL}/undo",
             method="POST",
@@ -136,7 +126,7 @@ class TestUndoAndApproval:
             },
         )
 
-        result = await server.call_tool("undo_chore_action", {"chore_id": 1})
+        result = await call_tool("undo_chore_action", {"chore_id": 1})
 
         assert "within 5 minutes" in result[0].text
 
@@ -167,7 +157,7 @@ class TestUndoAndApproval:
 
         assert chore.nextDueDate == "2026-09-27T12:00:00Z"
 
-    async def test_approve_not_admin(self, server_client, httpx_mock: HTTPXMock):
+    async def test_approve_not_admin(self, call_tool, httpx_mock: HTTPXMock):
         httpx_mock.add_response(
             url=f"{CHORE_URL}/approve",
             method="POST",
@@ -175,7 +165,7 @@ class TestUndoAndApproval:
             json={"error": "Only admins can approve chores"},
         )
 
-        result = await server.call_tool("approve_chore", {"chore_id": 1})
+        result = await call_tool("approve_chore", {"chore_id": 1})
 
         assert "Permission denied (Only admins can approve chores)" in result[0].text
 
@@ -207,7 +197,7 @@ class TestUndoAndApproval:
 class TestTimerAndNudge:
     """Time tracking and nudges."""
 
-    async def test_start_timer(self, server_client, httpx_mock: HTTPXMock):
+    async def test_start_timer(self, call_tool, httpx_mock: HTTPXMock):
         httpx_mock.add_response(
             url=f"{CHORE_URL}/start",
             method="PUT",
@@ -222,7 +212,7 @@ class TestTimerAndNudge:
         )
         httpx_mock.add_response(url=CHORE_URL, json={"res": {**CHORE, "status": 1}})
 
-        result = await server.call_tool("start_chore_timer", {"chore_id": 1})
+        result = await call_tool("start_chore_timer", {"chore_id": 1})
 
         assert "Started timer on chore 'Vacuum'" in result[0].text
         assert "Tracked time: 120s" in result[0].text
@@ -252,7 +242,7 @@ class TestTimerAndNudge:
         assert chore.status == 2
         assert timer["duration"] == 300
 
-    async def test_nudge(self, server_client, httpx_mock: HTTPXMock):
+    async def test_nudge(self, call_tool, httpx_mock: HTTPXMock):
         httpx_mock.add_response(
             url=f"{CHORE_URL}/nudge",
             method="POST",
@@ -263,7 +253,7 @@ class TestTimerAndNudge:
             },
         )
 
-        result = await server.call_tool(
+        result = await call_tool(
             "nudge_chore",
             {"chore_id": 1, "all_assignees": True, "message": "Please vacuum today"},
         )
@@ -287,7 +277,7 @@ class TestTimerAndNudge:
 class TestProjects:
     """Projects list and chore assignment."""
 
-    async def test_list_projects_plain_array(self, server_client, httpx_mock: HTTPXMock):
+    async def test_list_projects_plain_array(self, call_tool, httpx_mock: HTTPXMock):
         httpx_mock.add_response(
             url=f"{BASE_URL}/api/v1/projects",
             json=[
@@ -305,16 +295,16 @@ class TestProjects:
             ],
         )
 
-        result = await server.call_tool("list_projects", {})
+        result = await call_tool("list_projects", {})
 
         data = json.loads(result[0].text)
         assert data["projects"][0]["name"] == "Garden"
 
-    async def test_create_chore_with_project(self, server_client, httpx_mock: HTTPXMock):
+    async def test_create_chore_with_project(self, call_tool, httpx_mock: HTTPXMock):
         httpx_mock.add_response(url=f"{BASE_URL}/api/v1/chores/", method="POST", json={"res": 1})
         httpx_mock.add_response(url=CHORE_URL, json={"res": {**CHORE, "projectId": 2}})
 
-        await server.call_tool("create_chore", {"name": "Mow lawn", "project_id": 2})
+        await call_tool("create_chore", {"name": "Mow lawn", "project_id": 2})
 
         payload = json.loads(
             httpx_mock.get_request(url=f"{BASE_URL}/api/v1/chores/", method="POST").content

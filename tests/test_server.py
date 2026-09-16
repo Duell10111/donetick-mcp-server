@@ -5,7 +5,6 @@ import json
 import pytest
 from pytest_httpx import HTTPXMock
 
-from donetick_mcp.server import app, get_client, list_tools, call_tool
 
 
 @pytest.fixture
@@ -46,7 +45,7 @@ class TestMCPServer:
     """Integration tests for MCP server tools."""
 
     @pytest.mark.asyncio
-    async def test_list_tools(self):
+    async def test_list_tools(self, list_tools):
         """Test listing available tools."""
         tools = await list_tools()
 
@@ -102,7 +101,7 @@ class TestMCPServer:
             assert thing_tool in tool_names
 
     @pytest.mark.asyncio
-    async def test_list_chores_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
+    async def test_list_chores_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test list_chores tool execution."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/chores/",
@@ -118,7 +117,7 @@ class TestMCPServer:
         assert response_data["chores"][0]["name"] == "Test Chore"
 
     @pytest.mark.asyncio
-    async def test_list_chores_with_filters(self, sample_chore_data, httpx_mock: HTTPXMock):
+    async def test_list_chores_with_filters(self, sample_chore_data, httpx_mock: HTTPXMock, call_tool):
         """Test list_chores tool with filters."""
         inactive_chore = sample_chore_data.copy()
         inactive_chore["id"] = 2
@@ -136,7 +135,7 @@ class TestMCPServer:
         assert response_data["count"] == 1
 
     @pytest.mark.asyncio
-    async def test_list_chores_empty(self, httpx_mock: HTTPXMock):
+    async def test_list_chores_empty(self, httpx_mock: HTTPXMock, call_tool):
         """Test list_chores tool with no results."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/chores/",
@@ -149,7 +148,7 @@ class TestMCPServer:
         assert "No chores found" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_get_chore_tool(self, sample_chore_data, httpx_mock: HTTPXMock):
+    async def test_get_chore_tool(self, sample_chore_data, httpx_mock: HTTPXMock, call_tool):
         """Test get_chore tool execution."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/chores/1",
@@ -164,7 +163,7 @@ class TestMCPServer:
         assert response_data["name"] == "Test Chore"
 
     @pytest.mark.asyncio
-    async def test_get_chore_not_found(self, sample_chore_data, httpx_mock: HTTPXMock):
+    async def test_get_chore_not_found(self, sample_chore_data, httpx_mock: HTTPXMock, call_tool):
         """Test get_chore tool with non-existent ID."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/chores/999",
@@ -177,7 +176,7 @@ class TestMCPServer:
         assert "not found" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    async def test_create_chore_tool(self, sample_chore_data, httpx_mock: HTTPXMock):
+    async def test_create_chore_tool(self, sample_chore_data, httpx_mock: HTTPXMock, call_tool):
         """Test create_chore tool execution."""
         # Mock POST response (API returns {'res': chore_id})
         httpx_mock.add_response(
@@ -206,7 +205,7 @@ class TestMCPServer:
         assert "Test Chore" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_create_chore_minimal(self, sample_chore_data, httpx_mock: HTTPXMock):
+    async def test_create_chore_minimal(self, sample_chore_data, httpx_mock: HTTPXMock, call_tool):
         """Test create_chore tool with only required fields."""
         # Mock POST response (API returns {'res': chore_id})
         httpx_mock.add_response(
@@ -227,7 +226,7 @@ class TestMCPServer:
         assert "Successfully created" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_complete_chore_tool(self, sample_chore_data, httpx_mock: HTTPXMock):
+    async def test_complete_chore_tool(self, sample_chore_data, httpx_mock: HTTPXMock, call_tool):
         """Test complete_chore tool execution."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/chores/1/do",
@@ -242,7 +241,7 @@ class TestMCPServer:
         assert "Test Chore" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_complete_chore_with_user(self, sample_chore_data, httpx_mock: HTTPXMock):
+    async def test_complete_chore_with_user(self, sample_chore_data, httpx_mock: HTTPXMock, call_tool):
         """Test complete_chore tool sends completed_by, notes and time in the JSON body."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/chores/1/do",
@@ -264,7 +263,7 @@ class TestMCPServer:
         assert "Successfully completed" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_delete_chore_tool(self, httpx_mock: HTTPXMock):
+    async def test_delete_chore_tool(self, httpx_mock: HTTPXMock, call_tool):
         """Test delete_chore tool execution."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/chores/1",
@@ -278,7 +277,7 @@ class TestMCPServer:
         assert "Successfully deleted" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_update_chore_priority_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
+    async def test_update_chore_priority_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test update_chore_priority tool execution."""
         updated_chore = {**sample_chore_data, "priority": 4}
         httpx_mock.add_response(
@@ -299,7 +298,7 @@ class TestMCPServer:
         assert "priority to 4" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_update_chore_priority_validation(self, httpx_mock: HTTPXMock):
+    async def test_update_chore_priority_validation(self, httpx_mock: HTTPXMock, call_tool):
         """Test update_chore_priority with invalid priority."""
         result = await call_tool("update_chore_priority", {"chore_id": 1, "priority": 5})
 
@@ -307,7 +306,7 @@ class TestMCPServer:
         assert "Error" in result[0].text or "must be 0-4" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_update_chore_assignee_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
+    async def test_update_chore_assignee_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test update_chore_assignee tool execution."""
         # Mock GET to fetch current chore (fetch-modify-send pattern)
         httpx_mock.add_response(
@@ -336,7 +335,7 @@ class TestMCPServer:
         assert "user 2" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_skip_chore_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
+    async def test_skip_chore_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test skip_chore tool execution."""
         # For a recurring chore, skip schedules next occurrence
         updated_chore = {**sample_chore_data, "nextDueDate": "2025-11-17"}
@@ -353,7 +352,7 @@ class TestMCPServer:
         assert "next due date" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    async def test_tool_error_handling(self, httpx_mock: HTTPXMock):
+    async def test_tool_error_handling(self, httpx_mock: HTTPXMock, call_tool):
         """Test error handling in tools."""
         # Mock 3 retries for 500 error (client retries 3 times total)
         for _ in range(3):
@@ -370,7 +369,7 @@ class TestMCPServer:
         assert "Error" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_unknown_tool(self):
+    async def test_unknown_tool(self, call_tool):
         """Test calling an unknown tool."""
         result = await call_tool("unknown_tool", {})
 
@@ -378,7 +377,7 @@ class TestMCPServer:
         assert "Unknown tool" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_concurrent_tool_calls(self, sample_chore_data, httpx_mock: HTTPXMock):
+    async def test_concurrent_tool_calls(self, sample_chore_data, httpx_mock: HTTPXMock, call_tool):
         """Test handling concurrent tool calls."""
         import asyncio
 
@@ -402,7 +401,7 @@ class TestMCPServer:
     # ======================
 
     @pytest.mark.asyncio
-    async def test_list_labels_tool(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_list_labels_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test list_labels tool execution."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/labels",
@@ -421,7 +420,7 @@ class TestMCPServer:
         assert "#80d8ff" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_list_labels_empty(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_list_labels_empty(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test list_labels tool with no labels."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/labels",
@@ -434,7 +433,7 @@ class TestMCPServer:
         assert "No labels found" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_create_label_tool(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_create_label_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test create_label tool execution."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/labels",
@@ -450,7 +449,7 @@ class TestMCPServer:
         assert "#4caf50" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_create_label_invalid_color(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_create_label_invalid_color(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test create_label tool with invalid color format."""
         # API rejects with 422 validation error
         httpx_mock.add_response(
@@ -467,7 +466,7 @@ class TestMCPServer:
         assert "422" not in result[0].text  # Should be user-friendly, not show status code
 
     @pytest.mark.asyncio
-    async def test_update_label_tool(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_update_label_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test update_label tool execution."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/labels",
@@ -482,7 +481,7 @@ class TestMCPServer:
         assert "deep-cleaning" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_update_label_not_found(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_update_label_not_found(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test update_label tool with non-existent label."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/labels",
@@ -497,7 +496,7 @@ class TestMCPServer:
         assert "list_labels" in result[0].text  # Helpful hint
 
     @pytest.mark.asyncio
-    async def test_delete_label_tool(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_delete_label_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test delete_label tool execution."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/labels/1",
@@ -511,7 +510,7 @@ class TestMCPServer:
         assert "Successfully deleted label with ID 1" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_delete_label_not_found(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_delete_label_not_found(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test delete_label tool with non-existent label."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/labels/999",
@@ -529,7 +528,7 @@ class TestMCPServer:
     # ======================
 
     @pytest.mark.asyncio
-    async def test_get_circle_members_tool(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_get_circle_members_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test get_circle_members tool execution."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/circles/members/",
@@ -567,7 +566,7 @@ class TestMCPServer:
         assert "bob" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_get_circle_members_formatting(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_get_circle_members_formatting(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test get_circle_members tool output formatting."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/circles/members/",
@@ -601,7 +600,7 @@ class TestMCPServer:
         assert "✅" in response  # Active status emoji
 
     @pytest.mark.asyncio
-    async def test_list_circle_users_tool(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_list_circle_users_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test list_circle_users tool execution."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/users/",
@@ -637,7 +636,7 @@ class TestMCPServer:
         assert "bob@example.com" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_list_circle_users_empty(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_list_circle_users_empty(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test list_circle_users tool with no users."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/users/",
@@ -650,7 +649,7 @@ class TestMCPServer:
         assert "Found 0 user(s)" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_get_user_profile_tool(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_get_user_profile_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test get_user_profile tool execution."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/users/profile",
@@ -678,7 +677,7 @@ class TestMCPServer:
         assert "test@example.com" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_get_user_profile_formatting(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_get_user_profile_formatting(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test get_user_profile tool output formatting."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/users/profile",
@@ -723,7 +722,7 @@ class TestMCPServer:
     # ======================
 
     @pytest.mark.asyncio
-    async def test_create_chore_with_invalid_usernames(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_create_chore_with_invalid_usernames(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test create_chore tool with non-existent usernames."""
         # Mock get_circle_members to return available users
         httpx_mock.add_response(
@@ -748,7 +747,7 @@ class TestMCPServer:
         assert "get_circle_members" in result[0].text  # Helpful hint
 
     @pytest.mark.asyncio
-    async def test_create_chore_with_invalid_labels(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_create_chore_with_invalid_labels(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test create_chore tool with non-existent labels."""
         # Mock get_labels to return available labels
         httpx_mock.add_response(
@@ -774,7 +773,7 @@ class TestMCPServer:
         assert "create_label" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_create_chore_all_assignstrategies(self, sample_chore_data, httpx_mock: HTTPXMock):
+    async def test_create_chore_all_assignstrategies(self, sample_chore_data, httpx_mock: HTTPXMock, call_tool):
         """Test create_chore tool with all 7 assignment strategies."""
         strategies = [
             "least_completed",
@@ -814,7 +813,7 @@ class TestMCPServer:
             assert "Successfully created" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_create_chore_priority_validation(self, sample_chore_data, httpx_mock: HTTPXMock):
+    async def test_create_chore_priority_validation(self, sample_chore_data, httpx_mock: HTTPXMock, call_tool):
         """Test create_chore tool with priority 0-4 validation."""
         # Valid priorities: 0, 1, 2, 3, 4
         for priority in [0, 1, 2, 3, 4]:
@@ -855,7 +854,7 @@ class TestMCPServer:
         assert "Validation Error" in result[0].text or "Error" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_create_chore_frequency_transformation(self, sample_chore_data, httpx_mock: HTTPXMock):
+    async def test_create_chore_frequency_transformation(self, sample_chore_data, httpx_mock: HTTPXMock, call_tool):
         """Test create_chore tool frequency transformation from natural language to API format."""
         # Test days_of_week transformation
         httpx_mock.add_response(
@@ -888,7 +887,7 @@ class TestMCPServer:
     # ======================
 
     @pytest.mark.asyncio
-    async def test_http_401_authentication_error(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_http_401_authentication_error(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test handling of 401 authentication errors."""
         # Client re-authenticates once on 401 and retries, then gives up
         for _ in range(2):
@@ -908,7 +907,7 @@ class TestMCPServer:
         assert "401" not in result[0].text
 
     @pytest.mark.asyncio
-    async def test_http_403_forbidden_error(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_http_403_forbidden_error(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test handling of 403 forbidden errors."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/chores/1/do",
@@ -925,7 +924,7 @@ class TestMCPServer:
         assert "403" not in result[0].text
 
     @pytest.mark.asyncio
-    async def test_http_404_not_found_formatting(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_http_404_not_found_formatting(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test user-friendly 404 error messages."""
         # Test for chore not found
         httpx_mock.add_response(
@@ -941,7 +940,7 @@ class TestMCPServer:
         assert "404" not in result[0].text
 
     @pytest.mark.asyncio
-    async def test_http_422_validation_error(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_http_422_validation_error(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test handling of 422 validation errors."""
         # Pydantic validation will catch invalid dates before API call
         # So test with a valid date format but API rejects it
@@ -966,7 +965,7 @@ class TestMCPServer:
         assert "YYYY-MM-DD" in result[0].text or "RFC3339" in result[0].text or "date" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    async def test_http_400_with_api_error_message(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
+    async def test_http_400_with_api_error_message(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test that 400 errors show the actual API error message."""
         # Mock GET for fetch-modify-send pattern
         httpx_mock.add_response(
@@ -992,7 +991,7 @@ class TestMCPServer:
         assert "list_circle_users" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_http_429_rate_limit(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_http_429_rate_limit(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test handling of 429 rate limit errors."""
         # Mock retries (client retries 429 with backoff)
         # Provide 2 rate limit responses, then success
@@ -1021,7 +1020,7 @@ class TestMCPServer:
         assert "No chores found" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_http_500_server_error(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_http_500_server_error(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test handling of 500 server errors."""
         # Mock 3 retry attempts (client retries 500 errors)
         for _ in range(3):
@@ -1042,7 +1041,7 @@ class TestMCPServer:
         assert len(result[0].text) > 0
 
     @pytest.mark.asyncio
-    async def test_get_chore_history_tool(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_get_chore_history_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test get_chore_history tool execution."""
         history_data = [
             {
@@ -1084,7 +1083,7 @@ class TestMCPServer:
         assert "2025-11-05T10:00:00Z" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_get_all_chores_history_tool(self, httpx_mock: HTTPXMock, mock_login):
+    async def test_get_all_chores_history_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test get_all_chores_history tool execution."""
         history_data = [
             {
@@ -1129,7 +1128,7 @@ class TestMCPServer:
         assert "user 2" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_get_chore_details_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
+    async def test_get_chore_details_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test get_chore_details tool execution."""
         history_entry = {
             "id": 1,

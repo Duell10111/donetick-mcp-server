@@ -5,11 +5,12 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from mcp import Client
 from pytest_httpx import HTTPXMock
 
-from donetick_mcp import server
 from donetick_mcp.client import DonetickAuthError, DonetickClient, _parse_token_expiry
 from donetick_mcp.config import Config
+from donetick_mcp.server import mcp as mcp_server
 
 BASE_URL = "https://donetick.test"
 LOGIN_URL = f"{BASE_URL}/api/v1/auth/login"
@@ -260,23 +261,20 @@ class TestTokenRefresh:
 class TestServerAuthErrors:
     """Tests for authentication errors surfaced through MCP tools."""
 
-    async def test_mfa_error_message(self, monkeypatch, httpx_mock: HTTPXMock):
-        fresh_client = DonetickClient()
-        monkeypatch.setattr(server, "client", fresh_client)
+    async def test_mfa_error_message(self, httpx_mock: HTTPXMock):
+        # Own login mock instead of the call_tool fixture, which mocks a successful login
         httpx_mock.add_response(
             url=LOGIN_URL,
             method="POST",
             json={"mfaRequired": True, "sessionToken": "mfa_session"},
         )
 
-        try:
-            result = await server.call_tool("list_chores", {})
-        finally:
-            await fresh_client.close()
+        async with Client(mcp_server) as mcp_client:
+            result = await mcp_client.call_tool("list_chores", {})
 
-        assert len(result) == 1
-        assert "Authentication failed" in result[0].text
-        assert "multi-factor" in result[0].text
+        assert result.is_error
+        assert "Authentication failed" in result.content[0].text
+        assert "multi-factor" in result.content[0].text
 
 
 class TestConfig:

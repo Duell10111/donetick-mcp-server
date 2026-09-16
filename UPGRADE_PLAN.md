@@ -16,7 +16,8 @@ Dazu gehören das Dependency-Update und eine überarbeitete CLAUDE.md.
 | 2 – JWT-Authentifizierung härten | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
 | 3 – Bugfixes und API-Kompatibilität | ✅ umgesetzt (2026-09-16), inkl. 3.9 | `chore/phase-1-2-deps-jwt` |
 | 4 – Things-Integration | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
-| 5–6 | offen | – |
+| 5 – MCP SDK 2.x (`MCPServer`-Refactor, Option A) | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
+| 6 – Dokumentation | offen | – |
 | 7 – API-Token | zurückgestellt | – |
 
 Ergebnis Phase 1+2: `pytest -m "not live_api"` läuft ohne Env-Variablen mit **229 passed**
@@ -63,6 +64,22 @@ dazu `project_id` bei `create_chore` bzw. `projectId` bei `update_chore`.
 - `_request` liefert `{}` bei `200` ohne Body (kommt bei `PUT /start` vor, wenn ein pausierter Chore keine Session hat).
 - `GET /api/v1/projects` liefert ein nacktes Array statt `{"res": …}`. Projekte anlegen/ändern ist bewusst nicht umgesetzt.
 - `403`-Fehler zeigen jetzt die Donetick-Meldung an (z. B. „Only admins can approve chores“).
+
+Ergebnis Phase 5 (`MCPServer`-Refactor): **309 passed** mit `mcp` 2.2.0. Die stdio-Verbindung ist geprüft mit
+dem MCP-2.x-Client, mit einem klassischen `initialize`-Handshake (Protokoll `2025-06-18`) und im Docker-Image
+(Python 3.13).
+- `server.py` schrumpft von ca. 2.000 auf 88 Zeilen: `MCPServer` mit `lifespan` (erstellt und schließt den `DonetickClient`) und `instructions`. Die Serverversion kommt aus `__version__` (vorher wurde die SDK-Version gemeldet).
+- Tools liegen jetzt pro Domäne in `src/donetick_mcp/tools/`: `chores`, `chore_actions`, `labels`, `circle`, `history`, `things`. Das JSON-Schema wird aus Type-Hints (`Annotated[..., Field(description=...)]`) erzeugt.
+- `tools/_common.py`: Der Decorator `handle_errors` übernimmt die bisherigen Fehlermeldungen mit Hinweisen und wirft `ToolError`. **Fehler kommen jetzt als `isError=true`** (vorher als normale Textantwort).
+- Tool-Annotationen: `readOnlyHint` für Lesetools, `destructiveHint` für `delete_chore`, `delete_label`, `delete_thing`, `idempotentHint` für Updates.
+- Argumente werden vom SDK gegen das Schema validiert, bevor ein HTTP-Request rausgeht (z. B. `priority` 0–4).
+- Tests laufen über den In-Memory-`Client` (`call_tool`/`list_tools`-Fixtures in `tests/conftest.py`). Neue Datei `tests/test_mcp_server.py` (9 Tests).
+
+**Breaking Changes für Tool-Aufrufer:**
+- `update_chore` nutzt snake_case wie alle anderen Tools: `next_due_date`, `is_active`, `is_private`, `require_approval`, `frequency_type`, `frequency_metadata`, `is_rolling`, `assign_strategy`, `notification_metadata`, `completion_window`, `project_id` (vorher camelCase).
+- Entfernte Parameter ohne Wirkung: `create_chore.labels` (von Donetick ignoriert, stattdessen `label_names`/`labels_v2`), `create_chore.nagging`/`predue` (wurden nie ausgewertet, stattdessen `enable_nagging`/`enable_predue`), `deadline_offset`/`deadlineOffset` (existiert in Donetick nicht).
+- Neu im Schema (wurden vorher gelesen, waren aber nicht deklariert): `labels_v2`, `notification_metadata`, `completion_window`, `require_approval`.
+- `get_chore` mit unbekannter ID liefert jetzt einen Tool-Fehler statt normalem Text.
 
 Offen / neu entdeckt:
 - `deadlineOffset` bzw. `deadline_offset` existiert in Donetick `v0.1.79` nicht (kein Feld in `ChoreReq`) und wird ignoriert. Entfernen oder dokumentieren (Phase 6).
