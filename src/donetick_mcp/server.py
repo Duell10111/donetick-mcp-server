@@ -346,6 +346,10 @@ async def list_tools() -> list[Tool]:
                         "enum": list(THING_TRIGGER_CONDITIONS),
                         "description": "eq (default) or neq; gt, lt, gte, lte for number things only",
                     },
+                    "project_id": {
+                        "type": "integer",
+                        "description": "Project to add the chore to (see list_projects)",
+                    },
                 },
                 "required": ["name"],
             },
@@ -497,6 +501,10 @@ async def list_tools() -> list[Tool]:
                     "remove_thing_trigger": {
                         "type": "boolean",
                         "description": "Remove the chore's thing trigger (existing triggers are kept otherwise)",
+                    },
+                    "projectId": {
+                        "type": "integer",
+                        "description": "Move the chore to this project (see list_projects)",
                     },
                 },
                 "required": ["chore_id"],
@@ -791,6 +799,118 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["chore_id"],
             },
+        ),
+        # ==================== Chore actions ====================
+        Tool(
+            name="list_archived_chores",
+            description="List archived chores. Archived chores are hidden from list_chores' active chores.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="archive_chore",
+            description=(
+                "Archive a chore instead of deleting it: it becomes inactive and sends no notifications. "
+                "Only the chore creator can archive it. Restore with unarchive_chore."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {"chore_id": {"type": "integer", "description": "Chore ID"}},
+                "required": ["chore_id"],
+            },
+        ),
+        Tool(
+            name="unarchive_chore",
+            description="Restore an archived chore. Only the chore creator can unarchive it.",
+            inputSchema={
+                "type": "object",
+                "properties": {"chore_id": {"type": "integer", "description": "Chore ID"}},
+                "required": ["chore_id"],
+            },
+        ),
+        Tool(
+            name="undo_chore_action",
+            description=(
+                "Undo your last completion, skip, approval submission or rejection of a chore, "
+                "restoring the previous due date and assignee. Only works for your own action "
+                "within 5 minutes."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {"chore_id": {"type": "integer", "description": "Chore ID"}},
+                "required": ["chore_id"],
+            },
+        ),
+        Tool(
+            name="approve_chore",
+            description=(
+                "Approve a completion that is pending approval (chores with requireApproval). "
+                "Schedules the next occurrence. Circle admins and managers only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {"chore_id": {"type": "integer", "description": "Chore ID"}},
+                "required": ["chore_id"],
+            },
+        ),
+        Tool(
+            name="reject_chore",
+            description=(
+                "Reject a completion that is pending approval, optionally with a reason. "
+                "Circle admins and managers only."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "chore_id": {"type": "integer", "description": "Chore ID"},
+                    "notes": {"type": "string", "description": "Reason for the rejection (optional)"},
+                },
+                "required": ["chore_id"],
+            },
+        ),
+        Tool(
+            name="start_chore_timer",
+            description=(
+                "Start or resume time tracking on a chore and mark it as in progress. "
+                "Only users who can complete the chore can start it."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {"chore_id": {"type": "integer", "description": "Chore ID"}},
+                "required": ["chore_id"],
+            },
+        ),
+        Tool(
+            name="pause_chore_timer",
+            description="Pause time tracking on a chore that is in progress.",
+            inputSchema={
+                "type": "object",
+                "properties": {"chore_id": {"type": "integer", "description": "Chore ID"}},
+                "required": ["chore_id"],
+            },
+        ),
+        Tool(
+            name="nudge_chore",
+            description=(
+                "Send a push notification reminding the current assignee (or all assignees) about a "
+                "chore. You cannot nudge yourself."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "chore_id": {"type": "integer", "description": "Chore ID"},
+                    "all_assignees": {
+                        "type": "boolean",
+                        "description": "Nudge all assignees instead of only the current one (default: false)",
+                    },
+                    "message": {"type": "string", "description": "Custom message (optional)"},
+                },
+                "required": ["chore_id"],
+            },
+        ),
+        Tool(
+            name="list_projects",
+            description="List the projects of your circle. Chores can be grouped into projects (project_id).",
+            inputSchema={"type": "object", "properties": {}},
         ),
         # ==================== Things ====================
         Tool(
@@ -1152,6 +1272,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 # Advanced Features
                 subTasks=sub_tasks,
                 thingTrigger=thing_trigger,
+                projectId=arguments.get("project_id"),
 
                 # Completion Settings
                 completionWindow=arguments.get("completion_window"),
@@ -1632,6 +1753,97 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 )
             ]
 
+        elif name == "list_archived_chores":
+            chores = await client.list_archived_chores()
+            if not chores:
+                return [TextContent(type="text", text="No archived chores found.")]
+            brief = [
+                {"id": c.id, "name": c.name, "assignedTo": c.assignedTo, "createdBy": c.createdBy}
+                for c in chores
+            ]
+            return [
+                TextContent(type="text", text=json.dumps({"count": len(brief), "chores": brief}, indent=2))
+            ]
+
+        elif name in ("archive_chore", "unarchive_chore"):
+            chore_id = arguments["chore_id"]
+            if name == "archive_chore":
+                chore = await client.archive_chore(chore_id)
+                verb = "archived"
+            else:
+                chore = await client.unarchive_chore(chore_id)
+                verb = "unarchived"
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Successfully {verb} chore '{chore.name}' (ID: {chore.id}). Active: {chore.isActive}",
+                )
+            ]
+
+        elif name == "undo_chore_action":
+            message, chore = await client.undo_chore_action(arguments["chore_id"])
+            return [
+                TextContent(
+                    type="text",
+                    text=f"{message} on chore '{chore.name}' (ID: {chore.id}). "
+                    f"Next due date: {chore.nextDueDate}, assigned to: {chore.assignedTo}",
+                )
+            ]
+
+        elif name == "approve_chore":
+            chore = await client.approve_chore(arguments["chore_id"])
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Approved chore '{chore.name}' (ID: {chore.id}). "
+                    f"Next due date: {chore.nextDueDate}",
+                )
+            ]
+
+        elif name == "reject_chore":
+            chore = await client.reject_chore(arguments["chore_id"], notes=arguments.get("notes"))
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Rejected completion of chore '{chore.name}' (ID: {chore.id}).",
+                )
+            ]
+
+        elif name in ("start_chore_timer", "pause_chore_timer"):
+            chore_id = arguments["chore_id"]
+            if name == "start_chore_timer":
+                chore, timer = await client.start_chore_timer(chore_id)
+                verb = "Started"
+            else:
+                chore, timer = await client.pause_chore_timer(chore_id)
+                verb = "Paused"
+            duration = timer.get("duration")
+            duration_text = f" Tracked time: {duration}s." if duration is not None else ""
+            return [
+                TextContent(
+                    type="text",
+                    text=f"{verb} timer on chore '{chore.name}' (ID: {chore.id}).{duration_text}",
+                )
+            ]
+
+        elif name == "nudge_chore":
+            message, warnings = await client.nudge_chore(
+                arguments["chore_id"],
+                all_assignees=bool(arguments.get("all_assignees", False)),
+                message=arguments.get("message"),
+            )
+            text = message
+            if warnings:
+                text += "\n\nWarnings:\n" + "\n".join(f"  - {w}" for w in warnings)
+            return [TextContent(type="text", text=text)]
+
+        elif name == "list_projects":
+            projects = await client.list_projects()
+            if not projects:
+                return [TextContent(type="text", text="No projects found.")]
+            result = {"count": len(projects), "projects": [p.model_dump() for p in projects]}
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
         elif name == "list_things":
             things = await client.list_things()
             if not things:
@@ -1742,8 +1954,9 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 "   - DONETICK_PASSWORD"
             )
         elif status_code == 403:
+            reason = f" ({api_error})" if api_error else ""
             error_msg = (
-                "Permission denied. You may not have authorization for this operation.\n\n"
+                f"Permission denied{reason}. You may not have authorization for this operation.\n\n"
                 "💡 Hint: Verify that:\n"
                 "   - You have the correct credentials\n"
                 "   - The resource exists and belongs to your circle\n"
