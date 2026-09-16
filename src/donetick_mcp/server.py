@@ -13,7 +13,13 @@ from mcp.types import TextContent, Tool
 from . import __version__
 from .client import DonetickAuthError, DonetickClient
 from .config import config
-from .models import ChoreCreate, ChoreUpdate
+from .models import (
+    THING_TRIGGER_CONDITIONS,
+    THING_TYPES,
+    ChoreCreate,
+    ChoreUpdate,
+    normalize_datetime,
+)
 
 # Configure logging
 config.configure_logging()
@@ -21,6 +27,16 @@ logger = logging.getLogger(__name__)
 
 # Initialize MCP server
 app = Server("donetick-chores")
+
+HISTORY_STATUS_EMOJI = {
+    "started": "▶️",
+    "completed": "✅",
+    "skipped": "⏭️",
+    "pending_approval": "⏳",
+    "rejected": "❌",
+    "missed": "⚠️",
+    "rescheduled": "📅",
+}
 
 # Global client instance (initialized on startup)
 client: Optional[DonetickClient] = None
@@ -106,7 +122,9 @@ async def list_tools() -> list[Tool]:
                 "points: 10, usernames: ['Bob']}\n\n"
                 "5. One-time chore:\n"
                 "   {name: 'Fix leaky faucet', due_date: '2025-11-10', "
-                "priority: 5, usernames: ['Alice']}\n\n"
+                "priority: 4, usernames: ['Alice']}\n\n"
+                "6. Triggered by a thing (e.g. washing machine finished):\n"
+                "   {name: 'Empty washing machine', thing_id: 3, thing_trigger_state: 'false'}\n\n"
                 "Returns the created chore with its assigned ID and all metadata."
             ),
             inputSchema={
@@ -123,7 +141,10 @@ async def list_tools() -> list[Tool]:
                     },
                     "due_date": {
                         "type": "string",
-                        "description": "Due date in YYYY-MM-DD or RFC3339 format (optional)",
+                        "description": (
+                            "Due date in RFC3339 or YYYY-MM-DD format (optional). "
+                            "A date without time means 12:00 in the given timezone."
+                        ),
                     },
                     "created_by": {
                         "type": "integer",
@@ -160,7 +181,7 @@ async def list_tools() -> list[Tool]:
                             "• day_of_the_month: Specific day of month (e.g., 15th of each month)\n"
                             "• interval_based / interval: Custom interval (e.g., every N days)\n"
                             "• adaptive: Smart scheduling based on completion patterns\n"
-                            "• trigger: Triggered by events or conditions\n\n"
+                            "• trigger: Due when a thing reaches a state (use thing_id and thing_trigger_state)\n\n"
                             "TIP: For chores on specific days (Mon/Wed/Fri), use frequency_type='days_of_the_week' "
                             "with days_of_week=['Mon', 'Wed', 'Fri'] instead of frequency_type='weekly'"
                         ),
@@ -306,6 +327,25 @@ async def list_tools() -> list[Tool]:
                         "items": {"type": "string"},
                         "description": "EASY: Subtask names as simple strings (e.g., ['Do homework', 'Check work'])",
                     },
+
+                    # Thing trigger
+                    "thing_id": {
+                        "type": "integer",
+                        "description": (
+                            "Thing whose state triggers this chore (see list_things). The chore becomes due "
+                            "when the thing state matches. Sets frequency_type to 'trigger' unless given. "
+                            "Requires thing_trigger_state."
+                        ),
+                    },
+                    "thing_trigger_state": {
+                        "type": ["string", "number", "boolean"],
+                        "description": "State compared against the thing state (e.g. 'false', 10, 'done')",
+                    },
+                    "thing_trigger_condition": {
+                        "type": "string",
+                        "enum": list(THING_TRIGGER_CONDITIONS),
+                        "description": "eq (default) or neq; gt, lt, gte, lte for number things only",
+                    },
                 },
                 "required": ["name"],
             },
@@ -314,8 +354,9 @@ async def list_tools() -> list[Tool]:
             name="complete_chore",
             description=(
                 "Mark a chore as complete. "
-                "Optionally specify which user completed the chore. "
-                "Returns the updated chore with completion timestamp."
+                "Optionally add a note, a completion time, or (as circle admin) the user who completed it. "
+                "Chores requiring approval become pending approval instead. "
+                "Returns the updated chore with its next due date."
             ),
             inputSchema={
                 "type": "object",
@@ -326,7 +367,15 @@ async def list_tools() -> list[Tool]:
                     },
                     "completed_by": {
                         "type": "integer",
-                        "description": "User ID who completed the chore (optional)",
+                        "description": "User ID who completed the chore (optional, circle admins only)",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Completion note (optional)",
+                    },
+                    "completed_at": {
+                        "type": "string",
+                        "description": "Completion time in RFC3339 or YYYY-MM-DD format (optional, default: now)",
                     },
                 },
                 "required": ["chore_id"],
@@ -357,7 +406,10 @@ async def list_tools() -> list[Tool]:
                     },
                     "nextDueDate": {
                         "type": "string",
-                        "description": "New due date (ISO 8601 format, e.g., '2025-11-17')",
+                        "description": (
+                            "New due date in RFC3339 or YYYY-MM-DD format (date only means 12:00 UTC). "
+                            "If this is the only change, it is recorded as rescheduled in the history."
+                        ),
                     },
                     "priority": {
                         "type": "integer",
@@ -425,6 +477,26 @@ async def list_tools() -> list[Tool]:
                     "deadlineOffset": {
                         "type": "integer",
                         "description": "SECONDS after due time for grace period",
+                    },
+                    "thing_id": {
+                        "type": "integer",
+                        "description": (
+                            "Link or replace the thing that triggers this chore (requires thing_trigger_state). "
+                            "Combine with frequencyType='trigger' to only schedule the chore by the thing."
+                        ),
+                    },
+                    "thing_trigger_state": {
+                        "type": ["string", "number", "boolean"],
+                        "description": "State compared against the thing state",
+                    },
+                    "thing_trigger_condition": {
+                        "type": "string",
+                        "enum": list(THING_TRIGGER_CONDITIONS),
+                        "description": "eq (default) or neq; gt, lt, gte, lte for number things only",
+                    },
+                    "remove_thing_trigger": {
+                        "type": "boolean",
+                        "description": "Remove the chore's thing trigger (existing triggers are kept otherwise)",
                     },
                 },
                 "required": ["chore_id"],
@@ -681,24 +753,21 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_all_chores_history",
             description=(
-                "Get completion history for all chores with pagination support. "
-                "Returns completion records across all chores in the circle, "
-                "showing who completed what and when. "
-                "Use limit and offset for pagination through large result sets."
+                "Get chore history (completions, skips, reschedules) of the last days across all chores. "
+                "By default only your own entries are returned; set include_circle_members "
+                "to include everyone in the circle."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "limit": {
+                    "days": {
                         "type": "integer",
-                        "description": "Maximum number of history entries to return (default: 50, max: 200)",
+                        "description": "Number of days to look back (default: 7)",
                         "minimum": 1,
-                        "maximum": 200,
                     },
-                    "offset": {
-                        "type": "integer",
-                        "description": "Number of entries to skip for pagination (default: 0)",
-                        "minimum": 0,
+                    "include_circle_members": {
+                        "type": "boolean",
+                        "description": "Include entries of all circle members (default: false)",
                     },
                 },
             },
@@ -721,6 +790,115 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["chore_id"],
+            },
+        ),
+        # ==================== Things ====================
+        Tool(
+            name="list_things",
+            description=(
+                "List your things. Things are named values (text, number or boolean) such as sensors "
+                "or counters, e.g. set from Home Assistant. Their state can trigger chores. "
+                "Things are private to their owner. Returns ID, name, type and current state. "
+                "A chore's trigger is shown in its thingChore field (get_chore)."
+            ),
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="create_thing",
+            description=(
+                "Create a thing whose state can trigger chores. "
+                "Examples: {name: 'Washing machine running', type: 'boolean', state: false}, "
+                "{name: 'Litter box uses', type: 'number', state: 0}"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Thing name"},
+                    "type": {
+                        "type": "string",
+                        "enum": list(THING_TYPES),
+                        "description": "text, number (integers) or boolean",
+                    },
+                    "state": {
+                        "type": ["string", "number", "boolean"],
+                        "description": "Initial state matching the type (optional)",
+                    },
+                },
+                "required": ["name", "type"],
+            },
+        ),
+        Tool(
+            name="update_thing",
+            description=(
+                "Rename a thing or change its type. Changing the state here does NOT trigger chores; "
+                "use set_thing_state for that."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "thing_id": {"type": "integer", "description": "Thing ID"},
+                    "name": {"type": "string", "description": "New name"},
+                    "type": {
+                        "type": "string",
+                        "enum": list(THING_TYPES),
+                        "description": "New type (the state must be valid for it)",
+                    },
+                    "state": {
+                        "type": ["string", "number", "boolean"],
+                        "description": "New state without evaluating chore triggers",
+                    },
+                },
+                "required": ["thing_id"],
+            },
+        ),
+        Tool(
+            name="set_thing_state",
+            description=(
+                "Set a thing's state and evaluate the triggers of linked chores: matching chores "
+                "without due date become due now. Use increment to add to a number thing."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "thing_id": {"type": "integer", "description": "Thing ID"},
+                    "state": {
+                        "type": ["string", "number", "boolean"],
+                        "description": "New state matching the thing type",
+                    },
+                    "increment": {
+                        "type": "integer",
+                        "description": "Add this value to the current state (number things, may be negative)",
+                    },
+                },
+                "required": ["thing_id"],
+            },
+        ),
+        Tool(
+            name="get_thing_history",
+            description="Get the state history of a thing, newest first (10 entries per page).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "thing_id": {"type": "integer", "description": "Thing ID"},
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Number of entries to skip, e.g. 10 for the second page (default: 0)",
+                    },
+                },
+                "required": ["thing_id"],
+            },
+        ),
+        Tool(
+            name="delete_thing",
+            description=(
+                "Delete a thing. Fails while chores are still triggered by it; remove their trigger "
+                "first with update_chore (remove_thing_trigger)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {"thing_id": {"type": "integer", "description": "Thing ID"}},
+                "required": ["thing_id"],
             },
         ),
     ]
@@ -840,8 +1018,30 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
                 labels_v2 = [{"id": label_id} for label_id in label_map.values()]
 
+            # ===== Handle Thing Trigger =====
+            thing_trigger = None
+            thing_id = arguments.get("thing_id")
+            if thing_id is not None:
+                if arguments.get("thing_trigger_state") is None:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=(
+                                "Error: thing_trigger_state is required when thing_id is set.\n\n"
+                                "💡 Hint: Use list_things to see the thing's type and current state."
+                            ),
+                        )
+                    ]
+                # Validated before creating: Donetick links the thing after saving the chore
+                thing_trigger = await client.build_thing_trigger(
+                    thing_id,
+                    arguments["thing_trigger_state"],
+                    arguments.get("thing_trigger_condition"),
+                )
+
             # ===== Handle Frequency Metadata =====
-            frequency_type = arguments.get("frequency_type", "once")
+            default_frequency_type = "trigger" if thing_trigger else "once"
+            frequency_type = arguments.get("frequency_type", default_frequency_type)
             frequency_metadata = arguments.get("frequency_metadata", {})
             days_of_week = arguments.get("days_of_week", [])
             time_of_day = arguments.get("time_of_day")
@@ -903,7 +1103,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
             # ===== Calculate Due Date =====
             due_date = arguments.get("due_date")
-            if not due_date and frequency_type != "once":
+            if due_date:
+                # Donetick only accepts RFC3339; a date without time means 12:00 local time
+                due_date = normalize_datetime(due_date, timezone)
+            elif frequency_type not in ("once", "trigger"):
                 # Auto-calculate initial due date based on frequency
                 due_date = client.calculate_due_date(
                     frequency_type=frequency_type,
@@ -916,7 +1119,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 # Basic Information
                 name=arguments["name"],
                 description=arguments.get("description"),
-                dueDate=due_date,
+                nextDueDate=due_date,
                 createdBy=arguments.get("created_by"),
 
                 # Recurrence/Frequency
@@ -948,7 +1151,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
                 # Advanced Features
                 subTasks=sub_tasks,
-                thingChore=arguments.get("thing_chore"),
+                thingTrigger=thing_trigger,
 
                 # Completion Settings
                 completionWindow=arguments.get("completion_window"),
@@ -971,26 +1174,51 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             chore_id = arguments["chore_id"]
             completed_by = arguments.get("completed_by")
 
-            chore = await client.complete_chore(chore_id, completed_by=completed_by)
+            chore = await client.complete_chore(
+                chore_id,
+                completed_by=completed_by,
+                notes=arguments.get("notes"),
+                completed_at=arguments.get("completed_at"),
+            )
+
+            # Chore status 3 = pending approval
+            if chore.status == 3:
+                summary = f"Chore '{chore.name}' (ID: {chore.id}) is now pending approval"
+            else:
+                summary = f"Successfully completed chore '{chore.name}' (ID: {chore.id})"
 
             return [
                 TextContent(
                     type="text",
-                    text=f"Successfully completed chore '{chore.name}' (ID: {chore.id})\n\n"
-                    + json.dumps(chore.model_dump(), indent=2),
+                    text=f"{summary}\n\n" + json.dumps(chore.model_dump(), indent=2),
                 )
             ]
 
         elif name == "update_chore":
             chore_id = arguments.pop("chore_id")
+            thing_id = arguments.pop("thing_id", None)
+            thing_trigger_state = arguments.pop("thing_trigger_state", None)
+            thing_trigger_condition = arguments.pop("thing_trigger_condition", None)
+            remove_thing_trigger = bool(arguments.pop("remove_thing_trigger", False))
 
             # Build ChoreUpdate model from provided arguments
             # Filter out None values to only include fields that should be updated
             update_data = {k: v for k, v in arguments.items() if v is not None}
 
+            if thing_id is not None:
+                if remove_thing_trigger:
+                    raise ValueError("Use either thing_id or remove_thing_trigger, not both")
+                if thing_trigger_state is None:
+                    raise ValueError("thing_trigger_state is required when thing_id is set")
+                update_data["thingTrigger"] = await client.build_thing_trigger(
+                    thing_id, thing_trigger_state, thing_trigger_condition
+                )
+
             try:
                 update = ChoreUpdate(**update_data)
-                chore = await client.update_chore(chore_id, update)
+                chore = await client.update_chore(
+                    chore_id, update, remove_thing_trigger=remove_thing_trigger
+                )
 
                 return [
                     TextContent(
@@ -1276,6 +1504,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
                 entry_text = (
                     f"{status_emoji} Completion ID: {entry.id}\n"
+                    f"  📌 Status: {entry.status}\n"
                     f"  👤 Completed by: {completed_by}\n"
                     f"  📅 Completed at: {completed_at}\n"
                     f"  📝 Notes: {notes}"
@@ -1296,16 +1525,18 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             ]
 
         elif name == "get_all_chores_history":
-            limit = arguments.get("limit", 50)
-            offset = arguments.get("offset", 0)
+            days = arguments.get("days", 7)
+            include_circle_members = bool(arguments.get("include_circle_members", False))
 
-            history = await client.get_all_chores_history(limit=limit, offset=offset)
+            history = await client.get_all_chores_history(
+                days=days, include_circle_members=include_circle_members
+            )
 
             if not history:
                 return [
                     TextContent(
                         type="text",
-                        text="No completion history found",
+                        text=f"No chore history found in the last {days} days",
                     )
                 ]
 
@@ -1326,13 +1557,13 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 entry_lines = []
 
                 for entry in entries:
-                    status_emoji = "✅"
+                    status_emoji = HISTORY_STATUS_EMOJI.get(entry.status, "•")
                     # completedBy is user ID (integer), not username (string)
                     completed_by = f"user {entry.completedBy}" if entry.completedBy else "Unknown"
                     completed_at = entry.performedAt or "Unknown"
 
                     entry_lines.append(
-                        f"  {status_emoji} {completed_at} by {completed_by}"
+                        f"  {status_emoji} {entry.status} {completed_at} by {completed_by}"
                     )
 
                 section = (
@@ -1341,15 +1572,10 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 )
                 chore_sections.append(section)
 
-            pagination_hint = ""
-            if len(history) == limit:
-                pagination_hint = f"\n\n💡 Showing {limit} entries (offset: {offset}). Use offset={offset + limit} to see more."
-
             history_text = (
-                f"📊 Chore Completion History\n"
+                f"📊 Chore History (last {days} days)\n"
                 f"Showing {len(history)} entries\n\n"
                 + "\n\n".join(chore_sections)
-                + pagination_hint
             )
 
             return [
@@ -1370,6 +1596,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             last_user = f"user {details.lastCompletedBy}" if details.lastCompletedBy else "N/A"
             # Field is averageDuration (float seconds), not avgDuration
             avg_duration = f"{details.averageDuration:.1f}s" if details.averageDuration else "N/A"
+            tracked_time = f"{details.duration}s" if details.duration else "N/A"
 
             # Format recent history
             recent_history = []
@@ -1389,7 +1616,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 f"ID: {details.id}\n\n"
                 f"📈 Statistics:\n"
                 f"  Total Completions: {total_count}\n"
-                f"  Average Duration: {avg_duration}\n\n"
+                f"  Average Duration: {avg_duration}\n"
+                f"  Tracked Time: {tracked_time}\n\n"
                 f"🕐 Last Completion:\n"
                 f"  Date: {last_completed}\n"
                 f"  By: {last_user}\n\n"
@@ -1403,6 +1631,81 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                     text=details_text,
                 )
             ]
+
+        elif name == "list_things":
+            things = await client.list_things()
+            if not things:
+                return [TextContent(type="text", text="No things found.")]
+            result = {"count": len(things), "things": [thing.model_dump() for thing in things]}
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "create_thing":
+            thing = await client.create_thing(
+                arguments["name"], arguments["type"], arguments.get("state")
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Successfully created thing '{thing.name}' (ID: {thing.id})\n\n"
+                    + json.dumps(thing.model_dump(), indent=2),
+                )
+            ]
+
+        elif name == "update_thing":
+            thing = await client.update_thing(
+                arguments["thing_id"],
+                name=arguments.get("name"),
+                thing_type=arguments.get("type"),
+                state=arguments.get("state"),
+            )
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Successfully updated thing '{thing.name}' (ID: {thing.id})\n\n"
+                    + json.dumps(thing.model_dump(), indent=2),
+                )
+            ]
+
+        elif name == "set_thing_state":
+            thing, triggered = await client.set_thing_state(
+                arguments["thing_id"],
+                state=arguments.get("state"),
+                increment=arguments.get("increment"),
+            )
+            if triggered:
+                trigger_text = (
+                    f"Triggered chores: {', '.join(str(c) for c in triggered)} "
+                    "(due now if they had no due date)"
+                )
+            else:
+                trigger_text = "No chore triggers matched."
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Set state of thing '{thing.name}' (ID: {thing.id}) to '{thing.state}'. "
+                    f"{trigger_text}",
+                )
+            ]
+
+        elif name == "get_thing_history":
+            thing_id = arguments["thing_id"]
+            offset = arguments.get("offset", 0)
+            history = await client.get_thing_history(thing_id, offset=offset)
+            if not history:
+                return [TextContent(type="text", text=f"No history found for thing {thing_id}.")]
+            lines = [f"  {entry.createdAt or entry.updatedAt or 'Unknown'}: {entry.state}" for entry in history]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"📊 State history for thing {thing_id} ({len(history)} entries, offset {offset})\n"
+                    + "\n".join(lines),
+                )
+            ]
+
+        elif name == "delete_thing":
+            thing_id = arguments["thing_id"]
+            await client.delete_thing(thing_id)
+            return [TextContent(type="text", text=f"Successfully deleted thing with ID {thing_id}.")]
 
         else:
             return [

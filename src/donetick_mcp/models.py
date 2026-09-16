@@ -1,9 +1,88 @@
 """Pydantic models for Donetick API requests and responses."""
 
-from datetime import datetime
+import re
+from datetime import UTC, datetime
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+
+# Donetick ChoreHistoryStatus values (internal/chore/model/model.go)
+HISTORY_STATUS_NAMES = {
+    0: "started",
+    1: "completed",
+    2: "skipped",
+    3: "pending_approval",
+    4: "rejected",
+    5: "missed",
+    6: "rescheduled",
+}
+
+# Thing types whose state Donetick can validate (internal/thing/helper.go)
+THING_TYPES = ("text", "number", "boolean")
+
+# Conditions for thing-triggered chores; gt/lt/gte/lte only apply to numeric states
+THING_TRIGGER_CONDITIONS = ("eq", "neq", "gt", "lt", "gte", "lte")
+NUMERIC_TRIGGER_CONDITIONS = ("gt", "lt", "gte", "lte")
+
+
+def normalize_datetime(value: str, timezone: str = "UTC") -> str:
+    """Convert a date or datetime to the RFC3339 format required by Donetick.
+
+    Donetick parses dates as Go time.Time, which only accepts RFC3339 with a
+    timezone. A date without time (YYYY-MM-DD) is interpreted as 12:00 and a
+    datetime without offset as local time, both in the given timezone.
+
+    Raises:
+        ValueError: If the value is not a valid date or datetime
+    """
+    tz = ZoneInfo(timezone)
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d").replace(hour=12, tzinfo=tz)
+        except ValueError as e:
+            raise ValueError(f"Invalid date: {value}") from e
+        return parsed.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as e:
+        raise ValueError(
+            "Date must be in RFC3339 format (e.g., 2025-11-10T00:00:00Z) "
+            "or YYYY-MM-DD format (e.g., 2025-11-10)"
+        ) from e
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=tz).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return value
+
+
+def normalize_thing_state(thing_type: str, state: Any) -> str:
+    """Validate a thing state for its type and return it in Donetick's string format.
+
+    Raises:
+        ValueError: If the state is not valid for the thing type
+    """
+    if thing_type == "boolean":
+        if isinstance(state, bool):
+            return "true" if state else "false"
+        if isinstance(state, str) and state.strip().lower() in ("true", "false"):
+            return state.strip().lower()
+        raise ValueError(f'State of a boolean thing must be "true" or "false", got: {state!r}')
+
+    if thing_type == "number":
+        if isinstance(state, bool):
+            raise ValueError(f"State of a number thing must be an integer, got: {state!r}")
+        if isinstance(state, int):
+            return str(state)
+        if isinstance(state, str) and re.fullmatch(r"[+-]?\d+", state.strip()):
+            return str(int(state.strip()))
+        raise ValueError(f"State of a number thing must be an integer, got: {state!r}")
+
+    if thing_type == "text":
+        return "" if state is None else str(state)
+
+    raise ValueError(f'Invalid thing type "{thing_type}". Valid types: {", ".join(THING_TYPES)}')
 
 
 class Assignee(BaseModel):
@@ -19,6 +98,29 @@ class Label(BaseModel):
     name: str = Field(..., description="Label name")
     color: Optional[str] = Field(None, description="Label color (hex code)")
     created_by: Optional[int] = Field(None, alias="createdBy", description="User ID who created the label")
+
+
+class ThingTrigger(BaseModel):
+    """Trigger linking a chore to a thing state (sent as thingTrigger when saving a chore)."""
+
+    thingID: int = Field(..., gt=0, description="ID of the thing that triggers the chore")
+    triggerState: str = Field(..., description="State value the condition is compared against")
+    condition: Optional[str] = Field(
+        "eq",
+        description="Comparison: eq, neq (any type) or gt, lt, gte, lte (number things only)",
+    )
+
+    @field_validator("condition")
+    @classmethod
+    def validate_condition(cls, v: Optional[str]) -> str:
+        """Validate the trigger condition."""
+        if v is None or v == "":
+            return "eq"
+        if v not in THING_TRIGGER_CONDITIONS:
+            raise ValueError(
+                f'Invalid trigger condition "{v}". Valid values: {", ".join(THING_TRIGGER_CONDITIONS)}'
+            )
+        return v
 
 
 class NotificationMetadata(BaseModel):
@@ -37,7 +139,7 @@ class ChoreCreate(BaseModel):
             "example": {
                 "name": "Take out the trash",
                 "description": "Weekly trash collection on Monday mornings",
-                "dueDate": "2025-11-10T09:00:00Z",
+                "nextDueDate": "2025-11-10T09:00:00Z",
                 "createdBy": 1,
                 "frequencyType": "weekly",
                 "frequency": 1,
@@ -72,9 +174,11 @@ class ChoreCreate(BaseModel):
         max_length=5000,
         description="Chore description"
     )
-    dueDate: Optional[str] = Field(
+    nextDueDate: Optional[str] = Field(
         None,
-        description="Due date in RFC3339 or YYYY-MM-DD format",
+        # "dueDate" is accepted for backwards compatibility; Donetick only reads nextDueDate
+        validation_alias=AliasChoices("nextDueDate", "dueDate"),
+        description="Due date in RFC3339 or YYYY-MM-DD format (sent as RFC3339)",
     )
     createdBy: Optional[int] = Field(
         None,
@@ -125,8 +229,9 @@ class ChoreCreate(BaseModel):
     )
 
     # Organization & Priority
-    priority: Optional[int] = Field(
-        None,
+    # Donetick dereferences priority on create without a nil check, so always send it
+    priority: int = Field(
+        0,
         ge=0,
         le=4,
         description="Priority level (0=unset, 1=lowest, 4=highest)"
@@ -162,9 +267,13 @@ class ChoreCreate(BaseModel):
         default_factory=list,
         description="Sub-tasks/checklist items"
     )
-    thingChore: Optional[dict[str, Any]] = Field(
+    thingTrigger: Optional[ThingTrigger] = Field(
         None,
-        description="Thing/device association metadata"
+        description="Thing state that triggers this chore (use with frequencyType='trigger')"
+    )
+    projectId: Optional[int] = Field(
+        None,
+        description="Project the chore belongs to"
     )
 
     # Completion Settings (NEW)
@@ -204,29 +313,22 @@ class ChoreCreate(BaseModel):
         sanitized = ''.join(char for char in v if ord(char) >= 32 or char in '\n\r\t')
         return sanitized.strip() if sanitized.strip() else None
 
-    @field_validator('dueDate')
+    @field_validator('priority', mode='before')
+    @classmethod
+    def default_priority(cls, v: Any) -> Any:
+        """Send priority 0 (unset) when no priority is given."""
+        return 0 if v is None else v
+
+    @field_validator('nextDueDate')
     @classmethod
     def validate_due_date(cls, v: Optional[str]) -> Optional[str]:
-        """Validate date format (ISO 8601 or YYYY-MM-DD)."""
+        """Validate the due date and convert it to RFC3339 (YYYY-MM-DD becomes 12:00 UTC)."""
         if v is None:
             return v
-
-        # Try parsing as ISO 8601 / RFC3339
         try:
-            datetime.fromisoformat(v.replace('Z', '+00:00'))
-            return v
-        except ValueError:
-            pass
-
-        # Try parsing as YYYY-MM-DD
-        try:
-            datetime.strptime(v, '%Y-%m-%d')
-            return v
-        except ValueError:
-            raise ValueError(
-                'dueDate must be in RFC3339 format (e.g., 2025-11-10T00:00:00Z) '
-                'or YYYY-MM-DD format (e.g., 2025-11-10)'
-            )
+            return normalize_datetime(v)
+        except ValueError as e:
+            raise ValueError(f"dueDate: {e}") from e
 
     @field_validator('frequencyType')
     @classmethod
@@ -252,6 +354,9 @@ class ChoreCreate(BaseModel):
             raise ValueError(
                 f'frequencyType must be one of: {", ".join(valid_types)}'
             )
+        # Donetick only accepts "interval"
+        if v.lower() == "interval_based":
+            return "interval"
         return v.lower()
 
     @field_validator('assignStrategy')
@@ -431,6 +536,18 @@ class ChoreUpdate(BaseModel):
     # Subtasks (can be updated)
     subTasks: Optional[list[dict[str, Any]]] = Field(None, description="List of subtasks with name and orderId")
 
+    # Thing trigger and project
+    thingTrigger: Optional[ThingTrigger] = Field(None, description="Thing state that triggers this chore")
+    projectId: Optional[int] = Field(None, description="Project the chore belongs to")
+
+    @field_validator('nextDueDate')
+    @classmethod
+    def validate_next_due_date(cls, v: Optional[str]) -> Optional[str]:
+        """Convert the due date to RFC3339 (YYYY-MM-DD becomes 12:00 UTC)."""
+        if v is None:
+            return v
+        return normalize_datetime(v)
+
 
 class Chore(BaseModel):
     """Complete chore model as returned by the API."""
@@ -469,10 +586,12 @@ class Chore(BaseModel):
     isPrivate: bool = Field(default=False, description="Is private chore")
     points: Optional[int] = Field(None, description="Points awarded")
     subTasks: list[Any] = Field(default_factory=list, description="Sub-tasks")
-    thingChore: Optional[dict[str, Any]] = Field(None, description="Thing chore metadata")
+    thingChore: Optional[dict[str, Any]] = Field(None, description="Thing trigger linked to this chore")
     completionWindow: Optional[int] = Field(None, description="Days before/after due date for completion window")
     requireApproval: Optional[bool] = Field(None, description="Requires approval to mark complete")
     deadlineOffset: Optional[int] = Field(None, description="Offset in days for deadline calculation")
+    projectId: Optional[int] = Field(None, description="Project the chore belongs to")
+    syncVersion: Optional[int] = Field(None, description="Server sync version")
 
 
 class CircleMember(BaseModel):
@@ -545,22 +664,32 @@ class ChoreHistory(BaseModel):
 
     id: int = Field(..., description="History record ID")
     choreId: int = Field(..., description="Associated chore ID")
-    performedAt: str = Field(..., description="When the chore was performed (ISO 8601 datetime)")
+    performedAt: Optional[str] = Field(None, description="When the chore was performed (ISO 8601 datetime)")
     completedBy: int = Field(..., description="User ID who completed the chore")
     assignedTo: Optional[int] = Field(None, description="User ID the chore was assigned to")
-    note: Optional[str] = Field(None, max_length=5000, description="Completion note")
+    # Donetick returns "notes"; "note" is accepted for backwards compatibility
+    note: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("notes", "note"),
+        max_length=5000,
+        description="Completion note",
+    )
     dueDate: Optional[str] = Field(None, description="Original due date (ISO 8601)")
     status: str = Field(
         default="completed",
-        description="Completion status: completed, skipped, missed, pending_approval"
+        description=(
+            "Status: started, completed, skipped, pending_approval, rejected, missed, rescheduled"
+        ),
     )
     points: Optional[int] = Field(None, ge=0, description="Points awarded for completion")
     duration: Optional[int] = Field(None, ge=0, description="Time to completion in seconds")
 
     @field_validator('performedAt')
     @classmethod
-    def validate_performed_at(cls, v: str) -> str:
+    def validate_performed_at(cls, v: Optional[str]) -> Optional[str]:
         """Validate performedAt is in RFC3339 or ISO 8601 format."""
+        if v is None:
+            return v
         try:
             datetime.fromisoformat(v.replace('Z', '+00:00'))
             return v
@@ -586,12 +715,16 @@ class ChoreHistory(BaseModel):
                 'or ISO 8601 format'
             )
 
-    @field_validator('status')
+    @field_validator('status', mode='before')
     @classmethod
-    def validate_status(cls, v: str) -> str:
-        """Validate history status value."""
-        valid_statuses = ['completed', 'skipped', 'missed', 'pending_approval']
-        if v.lower() not in valid_statuses:
+    def validate_status(cls, v: Any) -> str:
+        """Validate history status; Donetick returns it as an integer."""
+        if isinstance(v, int) and not isinstance(v, bool):
+            if v not in HISTORY_STATUS_NAMES:
+                raise ValueError(f'Unknown history status: {v}')
+            return HISTORY_STATUS_NAMES[v]
+        valid_statuses = list(HISTORY_STATUS_NAMES.values())
+        if not isinstance(v, str) or v.lower() not in valid_statuses:
             raise ValueError(
                 f'status must be one of: {", ".join(valid_statuses)}'
             )
@@ -603,12 +736,12 @@ class ChoreDetail(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    # All base chore fields
+    # All base chore fields (Donetick's detail response only includes a subset)
     id: int = Field(..., description="Chore ID")
     name: str = Field(..., description="Chore name")
     description: Optional[str] = Field(None, description="Chore description")
     frequencyType: str = Field(..., description="Frequency type (once, daily, weekly, etc)")
-    frequency: int = Field(..., description="Frequency value")
+    frequency: Optional[int] = Field(None, description="Frequency value")
     frequencyMetadata: Optional[dict[str, Any]] = Field(None, description="Frequency metadata")
     nextDueDate: Optional[str] = Field(None, description="Next due date (ISO 8601)")
     isRolling: bool = Field(default=False, description="Is rolling schedule")
@@ -626,20 +759,23 @@ class ChoreDetail(BaseModel):
     )
     labels: Optional[list[str]] = Field(None, description="Legacy labels")
     labelsV2: list[Label] = Field(default_factory=list, description="Chore labels")
-    circleId: int = Field(..., description="Circle/household ID")
-    createdAt: str = Field(..., description="Creation timestamp (ISO 8601)")
-    updatedAt: str = Field(..., description="Last update timestamp (ISO 8601)")
+    circleId: Optional[int] = Field(None, description="Circle/household ID")
+    createdAt: Optional[str] = Field(None, description="Creation timestamp (ISO 8601)")
+    updatedAt: Optional[str] = Field(None, description="Last update timestamp (ISO 8601)")
     createdBy: int = Field(..., description="Creator user ID")
     updatedBy: Optional[int] = Field(None, description="Last updater user ID")
     status: Optional[Any] = Field(None, description="Chore status (can be string or int)")
     priority: Optional[int] = Field(None, ge=0, le=4, description="Priority (0=unset, 1=lowest, 4=highest)")
     isPrivate: bool = Field(default=False, description="Is private chore")
     points: Optional[int] = Field(None, description="Points awarded")
-    subTasks: list[Any] = Field(default_factory=list, description="Sub-tasks")
-    thingChore: Optional[dict[str, Any]] = Field(None, description="Thing chore metadata")
+    subTasks: Optional[list[Any]] = Field(default_factory=list, description="Sub-tasks")
+    thingChore: Optional[dict[str, Any]] = Field(None, description="Thing trigger linked to this chore")
     completionWindow: Optional[int] = Field(None, description="Days before/after due date for completion window")
     requireApproval: Optional[bool] = Field(None, description="Requires approval to mark complete")
     deadlineOffset: Optional[int] = Field(None, description="Offset in days for deadline calculation")
+    projectId: Optional[int] = Field(None, description="Project the chore belongs to")
+    notes: Optional[str] = Field(None, description="Notes of the most recent completion")
+    duration: Optional[int] = Field(None, description="Total time tracked on the chore in seconds")
 
     # Analytics and statistics fields
     totalCompletedCount: Optional[int] = Field(
@@ -680,6 +816,69 @@ class ChoreDetail(BaseModel):
                 'lastCompletedDate must be in RFC3339 format (e.g., 2025-11-10T14:30:00Z) '
                 'or ISO 8601 format'
             )
+
+
+class ThingChore(BaseModel):
+    """Link between a thing and a chore it triggers."""
+
+    thingId: int = Field(..., description="Thing ID")
+    choreId: int = Field(..., description="Chore ID")
+    triggerState: str = Field(..., description="State value the condition is compared against")
+    condition: Optional[str] = Field(None, description="Comparison: eq (default), neq, gt, lt, gte, lte")
+
+
+class Thing(BaseModel):
+    """Thing (e.g. a sensor or counter) whose state can trigger chores."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int = Field(..., description="Thing ID")
+    userID: Optional[int] = Field(None, description="Owner user ID (things are private to their owner)")
+    circleId: Optional[int] = Field(None, description="Circle ID")
+    name: str = Field(..., description="Thing name")
+    state: str = Field("", description="Current state as string")
+    type: str = Field(..., description="Thing type: text, number or boolean")
+    thingChores: Optional[list[ThingChore]] = Field(
+        default_factory=list,
+        description="Chores triggered by this thing (not included when listing things)",
+    )
+    createdAt: Optional[str] = Field(None, description="Creation timestamp (ISO 8601)")
+    updatedAt: Optional[str] = Field(None, description="Last update timestamp (ISO 8601)")
+
+
+class ThingHistory(BaseModel):
+    """Historic state of a thing."""
+
+    id: int = Field(..., description="History record ID")
+    thingId: int = Field(..., description="Thing ID")
+    state: str = Field(..., description="State value")
+    createdAt: Optional[str] = Field(None, description="When the state was recorded (ISO 8601)")
+    updatedAt: Optional[str] = Field(None, description="Last update timestamp (ISO 8601)")
+
+
+class ThingCreate(BaseModel):
+    """Model for creating or updating a thing."""
+
+    name: str = Field(..., min_length=1, max_length=200, description="Thing name")
+    type: str = Field(..., description="Thing type: text, number or boolean")
+    state: Optional[str] = Field(None, description="Initial state (validated against the type)")
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        """Validate the thing type."""
+        if v not in THING_TYPES:
+            raise ValueError(f'Invalid thing type "{v}". Valid types: {", ".join(THING_TYPES)}')
+        return v
+
+    @field_validator("state", mode="before")
+    @classmethod
+    def validate_state(cls, v: Any, info) -> Optional[str]:
+        """Validate the state against the thing type."""
+        thing_type = info.data.get("type")
+        if v is None or thing_type is None:
+            return v
+        return normalize_thing_state(thing_type, v)
 
 
 class APIError(BaseModel):

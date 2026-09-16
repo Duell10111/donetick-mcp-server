@@ -42,9 +42,9 @@ class TestChoreCreatePriorityValidation:
             assert "less than or equal to 4" in str(error).lower()
 
     def test_priority_validation_none_allowed(self):
-        """Test that None is accepted for priority (optional field)."""
+        """Test that None is accepted for priority and sent as 0 (Donetick requires priority)."""
         chore = ChoreCreate(name="Test Chore", priority=None)
-        assert chore.priority is None
+        assert chore.priority == 0
 
 
 class TestChoreCreateAssignStrategyValidation:
@@ -421,12 +421,19 @@ class TestChoreCreateDueDateValidation:
         ]
         for date_str in valid_dates:
             chore = ChoreCreate(name="Test Chore", dueDate=date_str)
-            assert chore.dueDate == date_str
+            assert chore.nextDueDate == date_str
+            # Donetick reads nextDueDate, not dueDate
+            assert chore.model_dump(exclude_none=True)["nextDueDate"] == date_str
 
     def test_duedate_validation_iso_date_format(self):
-        """Test that simple YYYY-MM-DD format is accepted."""
+        """Test that YYYY-MM-DD is accepted and converted to RFC3339 (12:00 UTC)."""
         chore = ChoreCreate(name="Test Chore", dueDate="2025-11-10")
-        assert chore.dueDate == "2025-11-10"
+        assert chore.nextDueDate == "2025-11-10T12:00:00Z"
+
+    def test_duedate_naive_datetime_gets_timezone(self):
+        """Test that a datetime without offset is sent with timezone (Go requires RFC3339)."""
+        chore = ChoreCreate(name="Test Chore", nextDueDate="2025-11-10T14:30:00")
+        assert chore.nextDueDate == "2025-11-10T14:30:00Z"
 
     def test_duedate_validation_invalid_format_fails(self):
         """Test that invalid date formats are rejected."""
@@ -467,7 +474,9 @@ class TestChoreCreateFrequencyTypeValidation:
             name="Test Chore",
             frequencyType=freq_type
         )
-        assert chore.frequencyType == freq_type.lower()
+        # Donetick only knows "interval"
+        expected = "interval" if freq_type == "interval_based" else freq_type.lower()
+        assert chore.frequencyType == expected
 
     def test_frequency_type_validation_case_insensitive(self):
         """Test that frequency type validation is case-insensitive."""

@@ -14,7 +14,9 @@ Dazu gehören das Dependency-Update und eine überarbeitete CLAUDE.md.
 |---|---|---|
 | 1 – Stabilisierung und Dependencies | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
 | 2 – JWT-Authentifizierung härten | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
-| 3–6 | offen | – |
+| 3 – Bugfixes und API-Kompatibilität | ✅ umgesetzt (2026-09-16), 3.9 offen | `chore/phase-1-2-deps-jwt` |
+| 4 – Things-Integration | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
+| 5–6 | offen | – |
 | 7 – API-Token | zurückgestellt | – |
 
 Ergebnis Phase 1+2: `pytest -m "not live_api"` läuft ohne Env-Variablen mit **229 passed**
@@ -28,6 +30,31 @@ Abweichungen und Zusatzfunde bei der Umsetzung:
 - Refresh-Token: Donetick liest ihn bevorzugt aus dem Cookie und sperrt bei Wiederverwendung die ganze Session-Familie. Der Client verwirft deshalb die Cookies, sendet den Token im Body und serialisiert Login/Refresh über einen Lock.
 - Neue Testdatei `tests/test_auth.py` (23 Tests: Login-Varianten, MFA, SSO-only, Refresh, paralleler Login, Config).
 - Nicht umgesetzt: `ruff`-Bereinigung des Bestandscodes (252 Altfunde, überwiegend N815 für camelCase-Felder, gewollt). Das gehört zu Phase 5/6.
+
+Ergebnis Phase 3+4: **282 passed** (mocked), 23 Live-Tests übersprungen (ohne Instanz nicht ausgeführt).
+`tools/list` liefert 26 Tools. Neue Testdateien: `tests/test_api_compat.py` (15), `tests/test_things.py` (37).
+
+Zusätzlich gefundene und behobene Inkompatibilitäten (alle im Donetick-Code `v0.1.79` verifiziert):
+- **`create_chore` ignorierte das Fälligkeitsdatum:** Gesendet wurde `dueDate`, Donetick liest nur `nextDueDate`, und zwar als RFC3339. `YYYY-MM-DD` wird jetzt zu 12:00 in der angegebenen Zeitzone (Tool-Parameter `timezone`) bzw. 12:00 UTC im Modell. `dueDate` bleibt als Eingabe-Alias erhalten.
+- **`create_chore` ohne `priority` → Panic in Donetick** (`*choreReq.Priority` ohne Nil-Check, `gin.New()` ohne Recovery). `priority` wird jetzt immer gesendet (Default 0).
+- **`update_chore` scheiterte bei zugewiesenen Chores:** Die `assignedTo`-Prüfung verglich eine ID mit `{"userId": …}`-Objekten und hängte einen nackten Integer an `assignees` an → `400`. Der zugehörige Test hatte das falsche Format sogar festgeschrieben.
+- **`update_chore`/`update_chore_assignee` löschten Thing-Trigger:** `EditChore` entfernt die Verknüpfung immer und legt sie nur aus `thingTrigger` neu an. Der Client wandelt `thingChore` jetzt in `thingTrigger` um.
+- **`update_chore_priority` scheiterte immer:** Die Antwort ist `{"message": …}`, kein Chore. Jetzt wird der Chore danach abgerufen.
+- **`ChoreHistory`:** `status` kommt als Integer (0–6) und wird auf Namen gemappt (inkl. `started`, `rejected`, `rescheduled`). `notes` statt `note`, `performedAt` kann `null` sein.
+- **`ChoreDetail`:** Die echte Antwort hat kein `frequency`, `circleId`, `createdAt`, `updatedAt`. Diese Felder sind jetzt optional; `notes` und `duration` sind ergänzt.
+- `frequencyType="interval_based"` wird von Donetick abgelehnt und jetzt auf `interval` abgebildet.
+- Things: `GET /api/v1/things` liefert keine `thingChores` (kein Preload), nur die Antwort von `PUT /things/{id}/state`. Die Thing-History liefert 10 Einträge pro Seite.
+- Live-Test `test_authentication_failure` rief die nicht existierende Methode `ensure_authenticated()` auf. Jetzt: `login()` → `DonetickAuthError`, und der Test wird ohne Konfiguration übersprungen.
+
+Bewusste Abweichungen vom Plan:
+- **3.8 `update_chore_assignee`** bleibt beim Full-PUT: `PUT /{id}/assignee` akzeptiert nur User, die schon in `assignees` stehen. Das Tool ersetzt die Zuweisung aber komplett.
+- **3.8 Due Date:** `PUT /{id}/dueDate` wird nur genutzt, wenn `nextDueDate` die einzige Änderung ist (dann als „rescheduled“ in der Historie).
+- **3.9 (optionale Chore-Tools)** nicht umgesetzt; die Entscheidung ist weiter offen.
+- **Thing-Trigger bei `update_chore`:** `frequencyType` wird nicht automatisch auf `trigger` gesetzt (nur bei `create_chore`), damit ein bestehender Zeitplan nicht stillschweigend geändert wird.
+
+Offen / neu entdeckt:
+- `deadlineOffset` bzw. `deadline_offset` existiert in Donetick `v0.1.79` nicht (kein Feld in `ChoreReq`) und wird ignoriert. Entfernen oder dokumentieren (Phase 6).
+- Der neue Live-Test `TestThings::test_thing_trigger_lifecycle` muss noch gegen eine echte Instanz laufen.
 
 ---
 

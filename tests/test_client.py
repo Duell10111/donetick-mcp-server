@@ -283,7 +283,7 @@ class TestDonetickClient:
             data = json.loads(payload)
             # Verify the constraint is satisfied
             assert data["assignedTo"] == 5
-            assert 5 in data["assignees"], "assignedTo must be in assignees array"
+            assert {"userId": 5} in data["assignees"], "assignedTo must be in assignees array"
             return httpx_lib.Response(200, json={"message": "Chore added successfully"})
 
         httpx_mock.add_callback(check_assignee_constraint, url="https://donetick.test/api/v1/chores/", method="PUT")
@@ -307,12 +307,18 @@ class TestDonetickClient:
 
     @pytest.mark.asyncio
     async def test_update_chore_priority(self, client, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
-        """Test updating chore priority."""
+        """Test updating chore priority (API returns a message, chore is fetched afterwards)."""
         updated_chore = {**sample_chore_data, "priority": 4}
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/chores/1/priority",
-            json=updated_chore,
+            match_json={"priority": 4},
+            json={"message": "Priority updated successfully"},
             method="PUT",
+        )
+        httpx_mock.add_response(
+            url="https://donetick.test/api/v1/chores/1",
+            json={"res": updated_chore},
+            method="GET",
         )
 
         async with client:
@@ -387,25 +393,27 @@ class TestDonetickClient:
                 {"id": 2, "name": "Task 2", "orderId": 1, "completedAt": None, "completedBy": 0},
             ]
         }
-        # First GET: update_subtask_completion fetches current chore
-        httpx_mock.add_response(
-            url="https://donetick.test/api/v1/chores/1",
-            json={"res": chore_with_subtasks},
-        )
-        # Second GET: update_chore fetches current chore
+        # First GET: update_subtask_completion checks the subtask exists
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/chores/1",
             json={"res": chore_with_subtasks},
         )
 
-        # Mock PUT response (returns message)
-        httpx_mock.add_response(
-            url="https://donetick.test/api/v1/chores/",
-            json={"message": "Chore added successfully"},
-            method="PUT",
+        # Dedicated subtask endpoint (returns empty object)
+        def check_subtask_payload(request):
+            import json
+            import httpx as httpx_lib
+            data = json.loads(request.read())
+            assert data["id"] == 1
+            assert data["choreId"] == 1
+            assert data["completedAt"].endswith("Z")
+            return httpx_lib.Response(200, json={})
+
+        httpx_mock.add_callback(
+            check_subtask_payload, url="https://donetick.test/api/v1/chores/1/subtask", method="PUT"
         )
 
-        # Third GET: update_chore fetches updated chore to return
+        # Second GET: fetch updated chore to return
         updated_chore = {
             **sample_chore_data,
             "subTasks": [
@@ -1231,7 +1239,7 @@ class TestDonetickClient:
 
     @pytest.mark.asyncio
     async def test_get_all_chores_history(self, httpx_mock: HTTPXMock, mock_login):
-        """Test getting all chores history with pagination."""
+        """Test getting chore history of the last days for the whole circle."""
         history_data = [
             {
                 "id": 1,
@@ -1255,7 +1263,8 @@ class TestDonetickClient:
         ]
 
         httpx_mock.add_response(
-            url="https://donetick.test/api/v1/chores/history?limit=10&offset=5",
+            # Donetick's "limit" is the number of days to look back
+            url="https://donetick.test/api/v1/chores/history?limit=30&members=true",
             json={"res": history_data},
         )
 
@@ -1266,7 +1275,7 @@ class TestDonetickClient:
         )
 
         async with client:
-            history = await client.get_all_chores_history(limit=10, offset=5)
+            history = await client.get_all_chores_history(days=30, include_circle_members=True)
 
             assert len(history) == 2
             assert history[0].choreId == 123

@@ -50,7 +50,7 @@ class TestMCPServer:
         """Test listing available tools."""
         tools = await list_tools()
 
-        assert len(tools) == 20  # 10 chore tools + 4 label tools + 3 user/member tools + 3 history tools
+        assert len(tools) == 26  # 10 chore + 4 label + 3 user/member + 3 history + 6 thing tools
         tool_names = [tool.name for tool in tools]
         # Chore tools (10 total)
         assert "list_chores" in tool_names
@@ -76,6 +76,16 @@ class TestMCPServer:
         assert "get_chore_history" in tool_names
         assert "get_all_chores_history" in tool_names
         assert "get_chore_details" in tool_names
+        # Thing tools (6 total)
+        for thing_tool in (
+            "list_things",
+            "create_thing",
+            "update_thing",
+            "set_thing_state",
+            "get_thing_history",
+            "delete_thing",
+        ):
+            assert thing_tool in tool_names
 
     @pytest.mark.asyncio
     async def test_list_chores_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
@@ -219,14 +229,22 @@ class TestMCPServer:
 
     @pytest.mark.asyncio
     async def test_complete_chore_with_user(self, sample_chore_data, httpx_mock: HTTPXMock):
-        """Test complete_chore tool with completed_by parameter."""
+        """Test complete_chore tool sends completed_by, notes and time in the JSON body."""
         httpx_mock.add_response(
-            url="https://donetick.test/api/v1/chores/1/do?completedBy=2",
-            json=sample_chore_data,
+            url="https://donetick.test/api/v1/chores/1/do",
+            match_json={
+                "completedBy": 2,
+                "notes": "Done early",
+                "completedTime": "2025-11-05T12:00:00Z",
+            },
+            json={"res": sample_chore_data},
             method="POST",
         )
 
-        result = await call_tool("complete_chore", {"chore_id": 1, "completed_by": 2})
+        result = await call_tool(
+            "complete_chore",
+            {"chore_id": 1, "completed_by": 2, "notes": "Done early", "completed_at": "2025-11-05"},
+        )
 
         assert len(result) == 1
         assert "Successfully completed" in result[0].text
@@ -251,8 +269,13 @@ class TestMCPServer:
         updated_chore = {**sample_chore_data, "priority": 4}
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/chores/1/priority",
-            json=updated_chore,
+            json={"message": "Priority updated successfully"},
             method="PUT",
+        )
+        httpx_mock.add_response(
+            url="https://donetick.test/api/v1/chores/1",
+            json={"res": updated_chore},
+            method="GET",
         )
 
         result = await call_tool("update_chore_priority", {"chore_id": 1, "priority": 4})
@@ -1071,8 +1094,9 @@ class TestMCPServer:
             },
         ]
 
+        history_data[1]["status"] = 2  # Donetick returns the status as integer (2 = skipped)
         httpx_mock.add_response(
-            url="https://donetick.test/api/v1/chores/history?limit=50&offset=0",
+            url="https://donetick.test/api/v1/chores/history?limit=7",
             json={"res": history_data},
         )
 
@@ -1080,7 +1104,8 @@ class TestMCPServer:
 
         assert len(result) == 1
         assert "📊" in result[0].text
-        assert "Chore Completion History" in result[0].text
+        assert "Chore History (last 7 days)" in result[0].text
+        assert "skipped" in result[0].text
         assert "Showing 2 entries" in result[0].text
         # Server displays "Chore #123" format (no chore names available in ChoreHistory)
         assert "Chore #123" in result[0].text
