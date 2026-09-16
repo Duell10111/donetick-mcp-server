@@ -1,191 +1,62 @@
 # Donetick MCP Server
 
-[![PyPI version](https://badge.fury.io/py/donetick-mcp-server.svg)](https://pypi.org/project/donetick-mcp-server/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub](https://img.shields.io/badge/github-jason1365%2Fdonetick--mcp--server-blue?logo=github)](https://github.com/jason1365/donetick-mcp-server)
+[![MCP SDK 2.x](https://img.shields.io/badge/MCP%20SDK-2.x-blue.svg)](https://github.com/modelcontextprotocol/python-sdk)
 
-A Model Context Protocol (MCP) server for [Donetick](https://donetick.com) chores management. Enables Claude and other MCP-compatible AI assistants to interact with your Donetick instance through a rate-limited API.
+A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for [Donetick](https://donetick.com), the open source chores and task manager. It lets Claude and other MCP clients manage chores, labels, projects and things of your Donetick instance.
+
+> **Fork notice:** This is a fork of [jason1365/donetick-mcp-server](https://github.com/jason1365/donetick-mcp-server), updated for Donetick v0.1.79 and MCP SDK 2.x. The PyPI package `donetick-mcp-server` is the upstream version; install this fork from Git (see below).
 
 ## Features
 
-- **16 MCP Tools**: Complete chore management (list, get, create, complete, update, delete, skip), label organization (list, create, update, delete), circle member information, user management (list circle users, get user profile)
-- **Full API Integration**: Uses Donetick Full API (/api/v1/) with all endpoints properly configured with trailing slashes
-- **Complete Field Support**: All 26+ chore creation fields working including frequency metadata, rolling schedules, multiple assignees, assignment strategies, notifications, labels, priority, points, sub-tasks, and more
-- **Consistent Field Casing**: camelCase fields throughout (name, description, dueDate, createdBy, etc.)
-- **Specialized Update Tools**: Update chore details, priority, and assignee with dedicated endpoints
-- **JWT Authentication**: Automatic token management with transparent refresh
-- **Smart Caching**: Intelligent caching for get_chore operations (60s TTL by default)
-- **Rate Limiting**: Token bucket algorithm prevents API overload
-- **Retry Logic**: Exponential backoff with jitter for resilient operations
-- **Async/Await**: Non-blocking operations using httpx
-- **Input Validation**: Pydantic field validators with sanitization
-- **Security Hardened**: HTTPS enforcement, sanitized logging, secure error messages, JWT token security
-- **Docker Support**: Containerized deployment with security best practices
-- **Comprehensive Testing**: Mocked unit/integration tests + live API test framework with pytest
-- **Type Safety**: Pydantic models for request/response validation
-
-## Quick Start
-
-**Easiest installation (Claude Code CLI):**
-
-```bash
-claude mcp add donetick uvx donetick-mcp-server@latest
-```
-
-Then configure your Donetick credentials when prompted.
-
-**Or install manually with uvx:**
-
-```bash
-# Install uv (one-time setup)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Add to Claude Desktop config
-# ~/.config/Claude/claude_desktop_config.json
-{
-  "mcpServers": {
-    "donetick": {
-      "command": "uvx",
-      "args": ["--refresh", "donetick-mcp-server"],
-      "env": {
-        "DONETICK_BASE_URL": "https://your-instance.com",
-        "DONETICK_USERNAME": "your_username",
-        "DONETICK_PASSWORD": "your_password"
-      }
-    }
-  }
-}
-```
-
-**Benefits:**
-- ✅ No installation required - runs directly from PyPI
-- ✅ Auto-updates with `--refresh` flag
-- ✅ Isolated environment - no conflicts
-- ✅ Works on Windows, macOS, Linux
+- **36 MCP tools** for chores, chore actions (archive, undo, approval, timer, nudge), labels, projects, circle members, history and things
+- **Things integration**: create things (text, number, boolean), set their state and trigger chores from it, e.g. from Home Assistant
+- **Natural language inputs** for `create_chore`: usernames, label names, days of the week, time of day, reminders, sub-task names
+- **Donetick v0.1.79 compatible**: request formats verified against the Donetick source (RFC3339 due dates, assignee objects, thing triggers, history status)
+- **JWT authentication** with refresh tokens, serialized re-authentication and clear errors for MFA-enabled accounts and SSO-only instances
+- **MCP SDK 2.x** (`MCPServer`): schemas generated from type hints, tool annotations (read-only, destructive, idempotent), errors returned with `isError`
+- **Rate limiting and retries**: token bucket rate limiter, exponential backoff for 5xx/timeouts, no automatic retries for actions that must not run twice (nudge, undo, approval)
+- **Docker image** running as non-root user
 
 ## Requirements
 
-- Donetick instance (self-hosted or cloud)
-- Donetick account credentials (username and password)
-- **For uvx method:** `uv` installed (see Quick Start)
-- **For other methods:** Python 3.11 or higher
+- A Donetick instance reachable via **HTTPS**
+- A Donetick account with **username and password**
+  - The account must **not have MFA enabled** (the server cannot enter TOTP codes)
+  - The instance must allow **password login** (instances with `disable_password_auth` / SSO-only are not supported)
+- [uv](https://docs.astral.sh/uv/) for the `uvx` setup, or Python 3.11+, or Docker
 
 ## Installation
 
-### Option 1: uvx (Recommended - No Installation Required)
+### Option 1: uvx from Git (recommended)
 
-See [Quick Start](#quick-start) above.
+No manual installation needed; `uvx` builds and runs the server from the repository.
 
-The `--refresh` flag ensures you always get the latest version when Claude Desktop restarts.
-
-### Option 2: Docker
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/jason1365/donetick-mcp-server.git
-   cd donetick-mcp-server
-   ```
-
-2. **Create `.env` file**:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-3. **Configure environment variables**:
-   ```env
-   DONETICK_BASE_URL=https://your-instance.com
-   DONETICK_USERNAME=your_username
-   DONETICK_PASSWORD=your_password
-   LOG_LEVEL=INFO
-   ```
-
-4. **Build and run**:
-   ```bash
-   docker-compose build
-   docker-compose up -d
-   ```
-
-### Option 3: pip install (For System Integration)
-
-If you want to install globally or in a virtual environment:
+**Claude Code:**
 
 ```bash
-# Install from PyPI
-pip install donetick-mcp-server
-
-# Or install for development
-git clone https://github.com/jason1365/donetick-mcp-server.git
-cd donetick-mcp-server
-pip install -e .
-
-# Run the server
-donetick-mcp-server
-# Or: python -m donetick_mcp.server
+claude mcp add donetick \
+  --env DONETICK_BASE_URL=https://donetick.example.com \
+  --env DONETICK_USERNAME=your_username \
+  --env DONETICK_PASSWORD=your_password \
+  -- uvx --from git+https://github.com/Duell10111/donetick-mcp-server donetick-mcp-server
 ```
 
-Then configure Claude Desktop to use the installed command:
-
-```json
-{
-  "mcpServers": {
-    "donetick": {
-      "command": "donetick-mcp-server",
-      "env": {
-        "DONETICK_BASE_URL": "https://your-instance.com",
-        "DONETICK_USERNAME": "your_username",
-        "DONETICK_PASSWORD": "your_password"
-      }
-    }
-  }
-}
-```
-
-## Authentication
-
-The MCP server uses JWT-based authentication with your Donetick credentials.
-
-**What You Need**:
-- Your Donetick username (same as web login)
-- Your Donetick password (same as web login)
-
-**How It Works**:
-1. Server logs in with your credentials on startup
-2. JWT token received and stored in memory
-3. Token automatically refreshed before expiration
-4. No manual token management required
-
-**Security**:
-- Credentials stored only in environment variables or `.env` file
-- JWT tokens kept in memory only (never persisted to disk)
-- Automatic token refresh prevents session expiration
-- HTTPS required for all connections
-
-## Claude Desktop Integration
-
-**Easiest Method - Claude Code CLI:**
-
-```bash
-claude mcp add donetick uvx donetick-mcp-server@latest
-```
-
-**Or manually edit the configuration file:**
-
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-**Linux**: `~/.config/Claude/claude_desktop_config.json`
-
-### uvx Configuration (Recommended)
+**Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "donetick": {
       "command": "uvx",
-      "args": ["--refresh", "donetick-mcp-server"],
+      "args": [
+        "--from",
+        "git+https://github.com/Duell10111/donetick-mcp-server",
+        "donetick-mcp-server"
+      ],
       "env": {
-        "DONETICK_BASE_URL": "https://your-instance.com",
+        "DONETICK_BASE_URL": "https://donetick.example.com",
         "DONETICK_USERNAME": "your_username",
         "DONETICK_PASSWORD": "your_password"
       }
@@ -194,9 +65,18 @@ claude mcp add donetick uvx donetick-mcp-server@latest
 }
 ```
 
-**Note:** The `--refresh` flag automatically updates to the latest version.
+Config file location: macOS `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows `%APPDATA%\Claude\claude_desktop_config.json`. Restart Claude Desktop after changes.
 
-### Docker Configuration
+### Option 2: Docker
+
+```bash
+git clone https://github.com/Duell10111/donetick-mcp-server.git
+cd donetick-mcp-server
+cp .env.example .env   # fill in your credentials
+docker compose build
+```
+
+MCP clients start the container per session over stdio:
 
 ```json
 {
@@ -204,377 +84,175 @@ claude mcp add donetick uvx donetick-mcp-server@latest
     "donetick": {
       "command": "docker",
       "args": [
-        "exec",
-        "-i",
-        "donetick-mcp-server",
-        "python",
-        "-m",
-        "donetick_mcp.server"
+        "run", "-i", "--rm",
+        "--env-file", "/absolute/path/to/donetick-mcp-server/.env",
+        "donetick-mcp-server:latest"
       ]
     }
   }
 }
 ```
 
-### pip install Configuration
+### Option 3: pip
 
-```json
-{
-  "mcpServers": {
-    "donetick": {
-      "command": "donetick-mcp-server",
-      "env": {
-        "DONETICK_BASE_URL": "https://your-instance.com",
-        "DONETICK_USERNAME": "your_username",
-        "DONETICK_PASSWORD": "your_password"
-      }
-    }
-  }
-}
+```bash
+git clone https://github.com/Duell10111/donetick-mcp-server.git
+cd donetick-mcp-server
+python -m venv venv && source venv/bin/activate
+pip install .
+
+donetick-mcp-server   # or: python -m donetick_mcp.server
 ```
 
-After updating the configuration, restart Claude Desktop.
-
-## Available Tools
-
-### 1. list_chores
-
-List all chores with optional filtering.
-
-**Parameters**:
-- `filter_active` (boolean, optional): Filter by active status
-- `assigned_to_user_id` (integer, optional): Filter by assigned user ID
-
-**Example**:
-```
-List all active chores assigned to me
-```
-
-### 2. get_chore
-
-Get details of a specific chore by ID.
-
-**Parameters**:
-- `chore_id` (integer, required): The chore ID
-
-**Example**:
-```
-Show me details of chore 123
-```
-
-### 3. create_chore
-
-Create a new chore with full configuration support.
-
-**Basic Parameters**:
-- `name` (string, required): Chore name (1-200 characters)
-- `description` (string, optional): Chore description (max 5000 characters)
-- `due_date` (string, optional): Due date in YYYY-MM-DD or RFC3339 format
-- `created_by` (integer, optional): Creator user ID
-
-**Recurrence/Frequency Parameters**:
-- `frequency_type` (string, optional): How often chore repeats - "once", "daily", "weekly", "monthly", "yearly", "interval_based" (default: "once")
-- `frequency` (integer, optional): Frequency multiplier, e.g., 1=weekly, 2=biweekly (default: 1)
-- `frequency_metadata` (object, optional): Additional frequency config like `{"days": [1,3,5], "time": "09:00"}`
-- `is_rolling` (boolean, optional): Rolling schedule (next due based on completion) vs fixed (default: false)
-
-**User Assignment Parameters**:
-- `assigned_to` (integer, optional): Primary assigned user ID
-- `assignees` (array, optional): Multiple assignees as `[{"userId": 1}, {"userId": 2}]`
-- `assign_strategy` (string, optional): Assignment strategy - "least_completed", "round_robin", "random" (default: "least_completed")
-
-**Notification Parameters**:
-- `notification` (boolean, optional): Enable notifications (default: false)
-- `nagging` (boolean, optional): Enable nagging/reminder notifications (default: false)
-- `predue` (boolean, optional): Enable pre-due date notifications (default: false)
-
-**Organization Parameters**:
-- `priority` (integer, optional): Priority level 1-5 (1=lowest, 5=highest)
-- `labels` (array, optional): Label tags like `["cleaning", "outdoor"]`
-
-**Status Parameters**:
-- `is_active` (boolean, optional): Active status - inactive chores are hidden (default: true)
-- `is_private` (boolean, optional): Private chore visible only to creator (default: false)
-
-**Gamification Parameters**:
-- `points` (integer, optional): Points awarded for completion
-
-**Advanced Parameters**:
-- `sub_tasks` (array, optional): Sub-tasks/checklist items
-
-**Examples**:
-```
-Create a simple one-time chore:
-Create a chore called "Take out trash" due on 2025-11-10
-
-Create a recurring chore with notifications:
-Create a weekly chore "Clean kitchen" every Monday at 9am with priority 4,
-enable nagging notifications, and assign it to user 1
-
-Create an advanced chore:
-Create a chore "Grocery shopping" that repeats weekly on Mondays and Wednesdays,
-assign to users 1 and 2 using round robin strategy, with priority 3,
-labels "shopping" and "outdoor", and award 10 points
-```
-
-### 4. complete_chore
-
-Mark a chore as complete.
-
-**Parameters**:
-- `chore_id` (integer, required): The chore ID
-- `completed_by` (integer, optional): User ID who completed it
-
-**Example**:
-```
-Mark chore 123 as complete
-```
-
-### 5. delete_chore
-
-Delete a chore permanently. **Only the creator can delete**.
-
-**Parameters**:
-- `chore_id` (integer, required): The chore ID
-
-**Example**:
-```
-Delete chore 123
-```
-
-### 6. get_circle_members
-
-Get all members in your circle (household/team). Shows who you can assign chores to.
-
-**Parameters**: None
-
-**Returns**:
-- User ID
-- Username
-- Display name
-- Role (admin/member)
-- Active status
-- Points and redeemed points
-
-**Example**:
-```
-Show me who's in my household
-Who can I assign chores to?
-List all circle members
-```
+Use `"command": "/path/to/venv/bin/donetick-mcp-server"` with the `env` block from option 1 in your MCP client configuration.
 
 ## Configuration
 
-### Environment Variables
-
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `DONETICK_BASE_URL` | Yes | - | Your Donetick instance URL (must use HTTPS) |
-| `DONETICK_USERNAME` | Yes | - | Your Donetick username |
-| `DONETICK_PASSWORD` | Yes | - | Your Donetick password |
-| `LOG_LEVEL` | No | INFO | Logging level (DEBUG, INFO, WARNING, ERROR) |
-| `RATE_LIMIT_PER_SECOND` | No | 10.0 | Requests per second limit |
-| `RATE_LIMIT_BURST` | No | 10 | Maximum burst size |
+| `DONETICK_BASE_URL` | Yes | – | Donetick instance URL (must use HTTPS) |
+| `DONETICK_USERNAME` | Yes | – | Donetick username |
+| `DONETICK_PASSWORD` | Yes | – | Donetick password |
+| `LOG_LEVEL` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` (logs go to stderr) |
+| `RATE_LIMIT_PER_SECOND` | No | `10.0` | Requests per second |
+| `RATE_LIMIT_BURST` | No | `10` | Burst capacity |
 
-### Rate Limiting
+Variables can also be set in a `.env` file in the working directory.
 
-The server implements a token bucket rate limiter to prevent API overload:
+### Authentication
 
-- **Default**: 10 requests per second with burst capacity of 10
-- **Conservative**: Starts conservative and can be increased based on your Donetick instance
-- **Respects 429**: Automatically backs off when rate limited by the API
+The server logs in with username and password (`POST /api/v1/auth/login`) and keeps the tokens in memory only:
 
-### Retry Logic
+- The access token is refreshed with the refresh token shortly before it expires, and again on a `401`; a new login is only done if the refresh fails.
+- Login and refresh are serialized, because Donetick revokes all sessions of a login when a refresh token is reused.
 
-- **Exponential backoff** with jitter for transient failures
-- **Maximum 3 retries** for most operations
-- **Smart retry**: Only retries on 5xx errors and 429 (rate limit)
-- **No retry on 4xx**: Client errors fail immediately (except 429)
+**Why no API token?** Donetick's long-lived API tokens (`secretkey` header) are not accepted for `/api/v1/labels` and `/api/v1/users/*`. With a token, 6 of the tools (label management, user list, profile) would not work, so the server uses JWT authentication for now.
+
+## Available Tools
+
+### Chores
+
+| Tool | Description | Key parameters |
+|------|-------------|----------------|
+| `list_chores` | List chores | `filter_active`, `assigned_to_user_id`, `detail_level` (`brief`/`full`) |
+| `get_chore` | Chore details incl. sub-tasks and thing trigger | `chore_id` |
+| `create_chore` | Create a chore | `name`, `due_date`, `frequency_type`, `days_of_week`, `time_of_day`, `timezone`, `usernames`, `label_names`, `priority`, `points`, `subtask_names`, `remind_minutes_before`, `thing_id`, `project_id`, … |
+| `update_chore` | Change chore fields (only given fields change) | `chore_id`, `name`, `description`, `next_due_date`, `priority`, `frequency_type`, `is_private`, `thing_id`, `remove_thing_trigger`, … |
+| `complete_chore` | Mark as done | `chore_id`, `notes`, `completed_at`, `completed_by` (admins) |
+| `skip_chore` | Skip the current occurrence | `chore_id` |
+| `update_chore_priority` | Set priority 0–4 | `chore_id`, `priority` |
+| `update_chore_assignee` | Make a user the only assignee | `chore_id`, `user_id` |
+| `update_subtask_completion` | Check/uncheck a sub-task | `chore_id`, `subtask_id`, `completed` |
+| `delete_chore` | Delete permanently (creator only) | `chore_id` |
+
+### Chore actions and projects
+
+| Tool | Description | Key parameters |
+|------|-------------|----------------|
+| `list_archived_chores` | List archived chores | – |
+| `archive_chore` / `unarchive_chore` | Archive or restore (creator only) | `chore_id` |
+| `undo_chore_action` | Undo your last completion, skip, approval submission or rejection (within 5 minutes) | `chore_id` |
+| `approve_chore` / `reject_chore` | Decide on completions pending approval (admins and managers) | `chore_id`, `notes` (reject) |
+| `start_chore_timer` / `pause_chore_timer` | Time tracking | `chore_id` |
+| `nudge_chore` | Push reminder to the assignee(s) | `chore_id`, `all_assignees`, `message` |
+| `list_projects` | List projects of the circle | – |
+
+### Labels, circle and history
+
+| Tool | Description | Key parameters |
+|------|-------------|----------------|
+| `list_labels` | List labels | – |
+| `create_label` / `update_label` | Create or change a label | `name`, `color`, `label_id` (update) |
+| `delete_label` | Delete a label | `label_id` |
+| `get_circle_members` | Members with user IDs, roles and points | – |
+| `list_circle_users` | Users of the circle | – |
+| `get_user_profile` | Your profile | – |
+| `get_chore_history` | History of one chore (completed, skipped, rescheduled, …) | `chore_id` |
+| `get_all_chores_history` | History of the last days | `days` (default 7), `include_circle_members` |
+| `get_chore_details` | Statistics of a chore | `chore_id` |
+
+### Things
+
+Things are named states (text, number or boolean) that can make chores due. They are private to their owner.
+
+| Tool | Description | Key parameters |
+|------|-------------|----------------|
+| `list_things` | List your things | – |
+| `create_thing` | Create a thing | `name`, `type` (`text`/`number`/`boolean`), `state` |
+| `update_thing` | Rename or change type (does not trigger chores) | `thing_id`, `name`, `type`, `state` |
+| `set_thing_state` | Set state and evaluate chore triggers | `thing_id`, `state` or `increment` |
+| `get_thing_history` | State history (10 entries per page) | `thing_id`, `offset` |
+| `delete_thing` | Delete (only without linked chores) | `thing_id` |
+
+A chore is linked to a thing with `thing_id`, `thing_trigger_state` and `thing_trigger_condition` (`eq`, `neq`, or `gt`/`lt`/`gte`/`lte` for number things). When the thing's state matches, a chore without due date becomes due now.
+
+### Example prompts
+
+```
+Create a chore "Take out trash" every Monday and Thursday at 19:00 for Alice with a reminder 15 minutes before
+Mark chore 42 as done with the note "also cleaned the bin"
+Create a boolean thing "Washing machine running" and a chore "Empty washing machine" that becomes due when it is false
+What did everyone in the household do in the last 14 days?
+```
 
 ## Development
 
-### Running Tests
-
-**Mocked Tests** (fast, no Donetick instance required):
 ```bash
-# Install dev dependencies
+python -m venv venv && source venv/bin/activate
 pip install -e ".[dev]"
 
-# Run all tests (unit + integration with mocks)
-pytest
-
-# Run with coverage
-pytest --cov=donetick_mcp --cov-report=html
-
-# Run specific test file
-pytest tests/test_client.py
-pytest tests/test_server.py
-
-# Run with verbose output
-pytest -v
+pytest -m "not live_api"          # mocked tests, no Donetick instance or env vars needed
+pytest --cov=donetick_mcp          # with coverage
+ruff check src tests
 ```
 
-**Live API Tests** (requires Donetick instance):
+**Live API tests** run against a real (test!) Donetick instance configured in `.env`:
+
 ```bash
-# Create .env file with credentials (see Configuration section)
-# Then run live API integration tests
-pytest tests/integration/test_live_api.py -v
-
-# Skip live tests
-pytest -m "not live_api"
-
-# Run only live tests
-pytest -m live_api
+pytest tests/integration -m live_api -v
 ```
 
-**Test Coverage Details**:
-- **Mocked tests** validate logic, retry behavior, rate limiting, error handling
-- **Live API tests** verify endpoint routing, field casing compatibility, response formats
-- **Full coverage** ensures both API client reliability and MCP tool correctness
+See [tests/integration/README.md](tests/integration/README.md). Without credentials these tests are skipped.
 
-### Project Structure
+### Project structure
 
 ```
-donetick-mcp-server/
-├── src/donetick_mcp/
-│   ├── __init__.py
-│   ├── server.py          # MCP server implementation
-│   ├── client.py           # Donetick API client
-│   ├── models.py           # Pydantic data models
-│   └── config.py           # Configuration management
-├── tests/
-│   ├── test_client.py      # API client tests
-│   └── test_server.py      # MCP server tests
-├── tmp/                    # Temporary files (gitignored)
-├── Dockerfile
-├── docker-compose.yml
-├── pyproject.toml
-└── README.md
+src/donetick_mcp/
+├── server.py          # MCPServer setup, lifespan, entry point
+├── tools/             # MCP tools by domain (chores, chore_actions, labels, circle, history, things)
+├── client.py          # Donetick API client: auth, rate limiting, retries, endpoints
+├── models.py          # Pydantic models and API format helpers
+└── config.py          # Environment configuration
+tests/                 # pytest suite (mocked HTTP), integration/ for live tests
 ```
-
-**Note**: The `tmp/` directory is used for temporary test scripts and analysis files during development. It's gitignored and not included in releases.
-
-## API Documentation
-
-This server uses the **Donetick Full API** (`/api/v1/`) with JWT authentication.
-
-### Official Resources
-
-- **Donetick Docs**: https://docs.donetick.com/
-- **Donetick GitHub**: https://github.com/donetick/donetick
-
-### API Architecture
-
-**Endpoints Used**:
-- **List Chores**: `GET /api/v1/chores/` (requires trailing slash)
-- **Get Chore**: `GET /api/v1/chores/{id}` (includes sub-tasks)
-- **Create Chore**: `POST /api/v1/chores/`
-- **Update Chore**: `PUT /api/v1/chores/{id}` (name, description, nextDueDate)
-- **Update Priority**: `PUT /api/v1/chores/{id}/priority`
-- **Update Assignee**: `PUT /api/v1/chores/{id}/assignee`
-- **Skip Chore**: `PUT /api/v1/chores/{id}/skip`
-- **Complete Chore**: `POST /api/v1/chores/{id}/do`
-- **Delete Chore**: `DELETE /api/v1/chores/{id}`
-- **Get Members**: `GET /api/v1/circles/members/` (requires trailing slash)
-
-**Important**: List endpoints require trailing slashes (`/api/v1/chores/`, `/api/v1/circles/members/`). This is handled automatically by the client.
-
-### Important Notes
-
-1. **Full API Used**: Not the external API (eAPI) - uses internal Full API
-2. **Field Casing**: Consistent camelCase throughout (name, description, dueDate, createdBy)
-3. **Trailing Slashes**: List endpoints include trailing slashes for proper routing
-4. **Authentication**: JWT Bearer tokens with automatic management
-5. **Complete Feature Support**: All 26+ chore creation fields available
-6. **Automatic Token Refresh**: JWT tokens refreshed transparently
-7. **Circle Scoped**: All operations scoped to your circle (household/team)
-8. **No Premium Restrictions**: All features available through full API
 
 ## Troubleshooting
 
-### Common Issues
+| Problem | Solution |
+|---------|----------|
+| `Failed to start server: Configuration validation failed` | Set `DONETICK_BASE_URL`, `DONETICK_USERNAME` and `DONETICK_PASSWORD`; the URL must start with `https://` |
+| `Login failed: invalid username or password` | Check the credentials by logging in to the Donetick web UI |
+| `... multi-factor authentication enabled ...` | Use an account without MFA for the MCP server |
+| `... password authentication is disabled ... (SSO-only)` | The instance only allows SSO; username/password login is required |
+| `Permission denied (...)` | The action needs other rights, e.g. only creators can delete or archive, only admins can approve |
+| `Rate limit exceeded` | Lower `RATE_LIMIT_PER_SECOND` |
+| Tools missing in the client | Restart the client; check its MCP logs; run the server command manually to see startup errors |
 
-**"DONETICK_BASE_URL environment variable is required"**
-- Make sure your `.env` file exists and is properly formatted
-- For Docker: ensure environment variables are passed in docker-compose.yml
-
-**"Rate limited, waiting..."**
-- The server is respecting API rate limits
-- Consider reducing `RATE_LIMIT_PER_SECOND` if this happens frequently
-
-**"Connection refused" or timeout errors**
-- Verify your Donetick instance URL is correct
-- Check that your Donetick instance is accessible
-- Ensure firewall rules allow outbound connections
-
-**"401 Unauthorized" or "Invalid credentials"**
-- Verify your username and password are correct
-- Check that your account is not locked or disabled
-- Ensure you can login to Donetick web interface with the same credentials
-- Check for typos in environment variables
-
-**Tools not showing in Claude**
-- Restart Claude Desktop after configuration changes
-- Check Claude Desktop logs for errors
-- Verify the configuration file path is correct
-
-### Debugging
-
-Enable debug logging:
-
-```bash
-export LOG_LEVEL=DEBUG
-```
-
-Or in Docker:
-
-```yaml
-environment:
-  - LOG_LEVEL=DEBUG
-```
-
-View Docker logs:
-
-```bash
-docker-compose logs -f donetick-mcp
-```
+Debug logging: set `LOG_LEVEL=DEBUG` to log every request, retry and update payload to stderr. Debug logs contain full request URLs and chore data, so do not share them unredacted.
 
 ## Security
 
-- **Credentials**: Never commit credentials to version control (use `.env` file)
-- **JWT Tokens**: Stored in memory only, never persisted to disk
-- **Automatic Token Refresh**: Prevents session expiration without user intervention
-- **Docker Isolation**: Runs as non-root user in container
-- **Resource Limits**: Memory and CPU limits prevent resource exhaustion
-- **Input Validation**: Pydantic models validate all inputs
-- **HTTPS Required**: Server enforces HTTPS for all Donetick connections
-
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
+- Credentials only in environment variables or `.env` (gitignored); tokens are kept in memory only
+- HTTPS is enforced and certificates are verified
+- Unexpected errors are logged on the server; the model only gets a generic message without internal details
+- The Docker image runs as a non-root user
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT License, see [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-- [Donetick](https://donetick.com) - Open source chores management
-- [Model Context Protocol](https://modelcontextprotocol.io) - MCP specification
-- [Anthropic](https://anthropic.com) - MCP SDK and Claude
-
-## Support
-
-- **Issues**: https://github.com/jason1365/donetick-mcp-server/issues
-- **Donetick Docs**: https://docs.donetick.com
-- **MCP Docs**: https://modelcontextprotocol.io
-
----
-
-Built with ❤️ for the Donetick and MCP communities
+- [jason1365/donetick-mcp-server](https://github.com/jason1365/donetick-mcp-server), the original project
+- [Donetick](https://github.com/donetick/donetick)
+- [Model Context Protocol](https://modelcontextprotocol.io)
