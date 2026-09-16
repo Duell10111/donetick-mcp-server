@@ -653,24 +653,29 @@ class TestDonetickClient:
 
     @pytest.mark.asyncio
     async def test_get_user_profile_success(self, client, httpx_mock: HTTPXMock, mock_login):
-        """Test getting current user profile with all fields."""
+        """Test getting the current user profile in Donetick's response format."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/users/profile",
-            json={
-                "id": 1,
-                "username": "alice",
-                "displayName": "Alice Smith",
-                "email": "alice@example.com",
-                "circleId": 10,
-                "image": "https://example.com/avatar.jpg",
-                "points": 250,
-                "pointsRedeemed": 50,
-                "isActive": True,
-                "createdAt": "2025-01-01T00:00:00Z",
-                "updatedAt": "2025-11-01T00:00:00Z",
-                "storageUsed": 1024,
-                "storageLimit": 10485760,
-            },
+            json={"res": {
+                    "id": 1,
+                    "displayName": "Alice Smith",
+                    "username": "alice",
+                    "email": "alice@example.com",
+                    "provider": 0,
+                    "circleID": 10,
+                    "chatID": 0,
+                    "image": "https://example.com/avatar.jpg",
+                    "timezone": "Europe/Berlin",
+                    "userType": 0,
+                    "mfaEnabled": False,
+                    "created_at": "2025-01-01T00:00:00Z",
+                    "updated_at": "2025-11-01T00:00:00Z",
+                    "disabled": False,
+                    "subscription": None,
+                    "expiration": None,
+                    "notification_target": {"userId": 1, "type": 1, "target_id": "123456"},
+                    "webhookURL": "https://hooks.example.com/secret-token",
+                }},
         )
 
         async with client:
@@ -680,9 +685,24 @@ class TestDonetickClient:
         assert profile.username == "alice"
         assert profile.displayName == "Alice Smith"
         assert profile.email == "alice@example.com"
-        assert profile.points == 250
-        assert profile.pointsRedeemed == 50
-        assert profile.storageUsed == 1024
+        assert profile.circleId == 10
+        assert profile.timezone == "Europe/Berlin"
+        assert profile.createdAt == "2025-01-01T00:00:00Z"
+        assert profile.notificationTarget["type"] == 1
+        assert profile.webhookURL == "https://hooks.example.com/secret-token"
+
+    @pytest.mark.asyncio
+    async def test_get_storage_usage(self, client, httpx_mock: HTTPXMock, mock_login):
+        """Test storage usage of the circle."""
+        httpx_mock.add_response(
+            url="https://donetick.test/api/v1/users/storage",
+            json={"res": {"used": 1048576, "total": 104857600}},
+        )
+
+        async with client:
+            usage = await client.get_storage_usage()
+
+        assert usage == {"used": 1048576, "total": 104857600}
 
     @pytest.mark.asyncio
     async def test_get_user_profile_wrapped(self, client, httpx_mock: HTTPXMock, mock_login):

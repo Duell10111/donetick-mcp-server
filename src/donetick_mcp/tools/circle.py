@@ -1,8 +1,18 @@
 """Circle member and user profile tools."""
 
+import asyncio
+import logging
+
 from mcp.server.mcpserver import Context, MCPServer
 
+from ..models import AUTH_PROVIDER_NAMES, NOTIFICATION_PLATFORM_NAMES
 from ._common import READ_ONLY, get_client, handle_errors
+
+logger = logging.getLogger(__name__)
+
+
+def _megabytes(value: int) -> str:
+    return f"{value / (1024 * 1024):.2f} MB"
 
 
 def register(mcp: MCPServer) -> None:
@@ -36,65 +46,119 @@ def register(mcp: MCPServer) -> None:
     @mcp.tool(annotations=READ_ONLY, structured_output=False)
     @handle_errors
     async def list_circle_users(ctx: Context) -> str:
-        """List all users in the circle with basic information.
+        """List all user accounts in the circle with account details.
 
-        Returns user IDs, usernames, display names, email addresses, roles, points earned,
-        and active status. Similar to get_circle_members but may include additional user details.
+        Returns user IDs, usernames, display names, email addresses, account type (regular/child),
+        timezone and whether the account is disabled. Roles and points are not part of Donetick's
+        user data; use get_circle_members for those.
         """
         users = await get_client(ctx).list_users()
 
         user_list = []
         for user in users:
-            status_emoji = "✅" if user.isActive else "❌"
-            display_name = user.displayName or "(no display name)"
-            email = user.email or "(no email)"
-            role = user.role or "member"
-            user_list.append(
-                f"{status_emoji} {user.username}\n"
-                f"  User ID: {user.id}\n"
-                f"  Display Name: {display_name}\n"
-                f"  Email: {email}\n"
-                f"  Role: {role}\n"
-                f"  Points: {user.points} (Redeemed: {user.pointsRedeemed})"
-            )
+            status_emoji = "❌" if user.disabled else "✅"
+            lines = [
+                f"{status_emoji} {user.username or '(no username)'}",
+                f"  User ID: {user.id}",
+                f"  Display Name: {user.displayName or '(no display name)'}",
+                f"  Email: {user.email or '(no email)'}",
+                f"  Account: {'child account' if user.userType == 1 else 'regular'}"
+                f"{' (disabled)' if user.disabled else ''}",
+            ]
+            if user.timezone:
+                lines.append(f"  Timezone: {user.timezone}")
+            user_list.append("\n".join(lines))
 
-        return f"Found {len(users)} user(s) in your circle:\n\n" + "\n\n".join(user_list)
+        return (
+            f"Found {len(users)} user(s) in your circle:\n\n"
+            + "\n\n".join(user_list)
+            + "\n\nRoles and points: see get_circle_members."
+        )
 
     @mcp.tool(annotations=READ_ONLY, structured_output=False)
     @handle_errors
     async def get_user_profile(ctx: Context) -> str:
-        """Get the current user's detailed profile information.
+        """Get the current user's profile.
 
-        Returns user data including notification preferences, webhook configuration, storage usage,
-        points, and account metadata.
+        Returns account details (username, display name, email, account type, login provider,
+        timezone, MFA), the circle role and points, the circle's storage usage and the configured
+        notification target.
         """
-        profile = await get_client(ctx).get_user_profile()
+        client = get_client(ctx)
+        profile = await client.get_user_profile()
 
-        display_name = profile.displayName or "(not set)"
-        email = profile.email or "(not set)"
-        webhook = profile.webhook or "(not configured)"
-        storage_used_mb = (profile.storageUsed or 0) / (1024 * 1024)
-        storage_limit_mb = (profile.storageLimit or 0) / (1024 * 1024)
-
-        return (
-            f"👤 User Profile for {profile.username}\n\n"
-            f"📝 Basic Information:\n"
-            f"  User ID: {profile.id}\n"
-            f"  Username: {profile.username}\n"
-            f"  Display Name: {display_name}\n"
-            f"  Email: {email}\n"
-            f"  Active: {'✅ Yes' if profile.isActive else '❌ No'}\n\n"
-            f"🏆 Gamification:\n"
-            f"  Points Earned: {profile.points}\n"
-            f"  Points Redeemed: {profile.pointsRedeemed}\n"
-            f"  Net Points: {profile.points - profile.pointsRedeemed}\n\n"
-            f"💾 Storage:\n"
-            f"  Used: {storage_used_mb:.2f} MB\n"
-            f"  Limit: {storage_limit_mb:.2f} MB\n"
-            f"  Available: {storage_limit_mb - storage_used_mb:.2f} MB\n\n"
-            f"🔔 Notifications:\n"
-            f"  Webhook: {webhook}\n\n"
-            f"🕐 Account Dates:\n"
-            f"  Created: {profile.createdAt or 'Unknown'}\n"
-            f"  Updated: {profile.updatedAt or 'Unknown'}"
+        # Role/points and storage come from other endpoints; show "unavailable" if they fail
+        members, storage = await asyncio.gather(
+            client.get_circle_members(), client.get_storage_usage(), return_exceptions=True
         )
+        if isinstance(members, Exception):
+            logger.warning(f"Could not fetch circle members for profile: {members}")
+            member = None
+        else:
+            member = next((m for m in members if m.userId == profile.id), None)
+        if isinstance(storage, Exception):
+            logger.warning(f"Could not fetch storage usage for profile: {storage}")
+            storage = None
+
+        account_type = "child account" if profile.userType == 1 else "regular"
+        provider = AUTH_PROVIDER_NAMES.get(profile.provider, "unknown")
+        lines = [
+            f"👤 User Profile for {profile.username or profile.displayName}",
+            "",
+            "📝 Basic Information:",
+            f"  User ID: {profile.id}",
+            f"  Username: {profile.username or '(not set)'}",
+            f"  Display Name: {profile.displayName or '(not set)'}",
+            f"  Email: {profile.email or '(not set)'}",
+            f"  Account: {account_type}, login via {provider}",
+            f"  Timezone: {profile.timezone or '(not set)'}",
+            f"  MFA: {'enabled' if profile.mfaEnabled else 'disabled'}",
+            f"  Status: {'❌ disabled' if profile.disabled else '✅ active'}",
+            "",
+            "🏆 Circle:",
+            f"  Circle ID: {profile.circleId}",
+        ]
+        if member:
+            lines += [
+                f"  Role: {member.role}",
+                f"  Points Earned: {member.points}",
+                f"  Points Redeemed: {member.pointsRedeemed}",
+                f"  Net Points: {(member.points or 0) - (member.pointsRedeemed or 0)}",
+            ]
+        else:
+            lines.append("  Role and points: unavailable")
+
+        lines += ["", "💾 Storage (whole circle):"]
+        if storage is None:
+            lines.append("  unavailable")
+        else:
+            lines.append(f"  Used: {_megabytes(storage['used'])}")
+            if storage["total"]:
+                lines += [
+                    f"  Limit: {_megabytes(storage['total'])}",
+                    f"  Available: {_megabytes(max(storage['total'] - storage['used'], 0))}",
+                ]
+            else:
+                lines.append("  Limit: not configured")
+
+        target = profile.notificationTarget or {}
+        platform = NOTIFICATION_PLATFORM_NAMES.get(target.get("type"), "none")
+        lines += [
+            "",
+            "🔔 Notifications:",
+            f"  Notification target: {platform}",
+            # The URL itself is not shown, webhook URLs often contain secrets
+            f"  Circle webhook: {'configured' if profile.webhookURL else 'not configured'}",
+        ]
+
+        if profile.subscription:
+            expiration = f" (until {profile.expiration})" if profile.expiration else ""
+            lines += ["", f"⭐ Subscription: {profile.subscription}{expiration}"]
+
+        lines += [
+            "",
+            "🕐 Account Dates:",
+            f"  Created: {profile.createdAt or 'Unknown'}",
+            f"  Updated: {profile.updatedAt or 'Unknown'}",
+        ]
+        return "\n".join(lines)

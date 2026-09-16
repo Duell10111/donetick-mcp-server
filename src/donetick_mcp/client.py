@@ -1643,6 +1643,17 @@ class DonetickClient:
         logger.info(f"Retrieved profile for user: {profile.username} (ID: {profile.id})")
         return profile
 
+    async def get_storage_usage(self) -> dict[str, int]:
+        """
+        Get the file storage usage of the circle.
+
+        Returns:
+            Dictionary with "used" and "total" in bytes (total 0 = no limit configured)
+        """
+        data = await self._request("GET", "/api/v1/users/storage")
+        usage = data.get("res", data) if isinstance(data, dict) else {}
+        return {"used": int(usage.get("used") or 0), "total": int(usage.get("total") or 0)}
+
     def transform_frequency_metadata(
         self,
         frequency_type: str,

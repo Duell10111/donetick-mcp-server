@@ -605,25 +605,29 @@ class TestMCPServer:
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/users/",
             json=[
+                # Shape of Donetick's user objects (no role, points or isActive)
                 {
                     "id": 1,
                     "username": "alice",
                     "displayName": "Alice Smith",
                     "email": "alice@example.com",
-                    "role": "admin",
-                    "points": 200,
-                    "pointsRedeemed": 50,
-                    "isActive": True,
+                    "provider": 0,
+                    "circleID": 1,
+                    "image": "",
+                    "timezone": "Europe/Berlin",
+                    "userType": 0,
+                    "mfaEnabled": False,
+                    "disabled": False,
                 },
                 {
                     "id": 2,
-                    "username": "bob",
+                    "username": "",
                     "displayName": "Bob Jones",
-                    "email": "bob@example.com",
-                    "role": "member",
-                    "points": 100,
-                    "pointsRedeemed": 20,
-                    "isActive": True,
+                    "email": "",
+                    "provider": 0,
+                    "circleID": 1,
+                    "userType": 1,
+                    "disabled": True,
                 },
             ],
         )
@@ -631,9 +635,15 @@ class TestMCPServer:
         result = await call_tool("list_circle_users", {})
 
         assert len(result) == 1
-        assert "Found 2 user(s)" in result[0].text
-        assert "alice" in result[0].text
-        assert "bob@example.com" in result[0].text
+        text = result[0].text
+        assert "Found 2 user(s)" in text
+        assert "alice" in text
+        assert "Timezone: Europe/Berlin" in text
+        assert "(no username)" in text
+        assert "child account (disabled)" in text
+        # Donetick does not return roles or points for users; don't invent them
+        assert "Role:" not in text
+        assert "Points:" not in text
 
     @pytest.mark.asyncio
     async def test_list_circle_users_empty(self, httpx_mock: HTTPXMock, mock_login, call_tool):
@@ -650,72 +660,95 @@ class TestMCPServer:
 
     @pytest.mark.asyncio
     async def test_get_user_profile_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
-        """Test get_user_profile tool execution."""
+        """Test get_user_profile combines profile, circle membership and storage usage."""
         httpx_mock.add_response(
             url="https://donetick.test/api/v1/users/profile",
-            json={
-                "id": 1,
-                "username": "testuser",
-                "displayName": "Test User",
-                "email": "test@example.com",
-                "isActive": True,
-                "points": 250,
-                "pointsRedeemed": 75,
-                "storageUsed": 10485760,  # 10MB in bytes
-                "storageLimit": 104857600,  # 100MB in bytes
-                "webhook": "https://webhook.example.com",
-                "createdAt": "2025-01-01T00:00:00Z",
-                "updatedAt": "2025-11-01T00:00:00Z",
-            },
+            json={"res": {
+                    "id": 1,
+                    "displayName": "Alice Smith",
+                    "username": "alice",
+                    "email": "alice@example.com",
+                    "provider": 0,
+                    "circleID": 10,
+                    "chatID": 0,
+                    "image": "https://example.com/avatar.jpg",
+                    "timezone": "Europe/Berlin",
+                    "userType": 0,
+                    "mfaEnabled": False,
+                    "created_at": "2025-01-01T00:00:00Z",
+                    "updated_at": "2025-11-01T00:00:00Z",
+                    "disabled": False,
+                    "subscription": None,
+                    "expiration": None,
+                    "notification_target": {"userId": 1, "type": 1, "target_id": "123456"},
+                    "webhookURL": "https://hooks.example.com/secret-token",
+                }},
         )
-
-        result = await call_tool("get_user_profile", {})
-
-        assert len(result) == 1
-        assert "testuser" in result[0].text
-        assert "Test User" in result[0].text
-        assert "test@example.com" in result[0].text
-
-    @pytest.mark.asyncio
-    async def test_get_user_profile_formatting(self, httpx_mock: HTTPXMock, mock_login, call_tool):
-        """Test get_user_profile tool output formatting."""
         httpx_mock.add_response(
-            url="https://donetick.test/api/v1/users/profile",
-            json={
-                "id": 1,
-                "username": "alice",
-                "displayName": "Alice Admin",
-                "email": "alice@example.com",
-                "isActive": True,
-                "points": 300,
-                "pointsRedeemed": 100,
-                "storageUsed": 52428800,  # 50MB
-                "storageLimit": 104857600,  # 100MB
-                "webhook": "https://webhook.example.com",
-                "createdAt": "2025-01-01T00:00:00Z",
-                "updatedAt": "2025-11-04T00:00:00Z",
-            },
+            url="https://donetick.test/api/v1/circles/members",
+            json={"res": [
+                    {"id": 1, "userId": 1, "circleId": 10, "role": "admin", "isActive": True,
+                     "username": "alice", "displayName": "Alice Smith", "points": 300, "pointsRedeemed": 100},
+                    {"id": 2, "userId": 2, "circleId": 10, "role": "member", "isActive": True,
+                     "username": "", "displayName": "Bob", "points": 5, "pointsRedeemed": 0},
+                ]},
+        )
+        httpx_mock.add_response(
+            url="https://donetick.test/api/v1/users/storage",
+            json={"res": {"used": 52428800, "total": 104857600}},
         )
 
         result = await call_tool("get_user_profile", {})
 
         assert len(result) == 1
         response = result[0].text
-        # Check sections
         assert "User Profile for alice" in response
-        assert "Basic Information:" in response
-        assert "Gamification:" in response
-        assert "Storage:" in response
-        assert "Notifications:" in response
-        # Check calculated values
-        assert "Net Points: 200" in response  # 300 - 100
-        assert "50.00 MB" in response  # Storage used
-        assert "50.00 MB" in response  # Available storage (100-50)
-        # Check emojis for better formatting
-        assert "👤" in response
-        assert "🏆" in response
-        assert "💾" in response
-        assert "🔔" in response
+        assert "Alice Smith" in response
+        assert "Timezone: Europe/Berlin" in response
+        assert "login via Donetick" in response
+        # Role and points come from the circle membership
+        assert "Role: admin" in response
+        assert "Net Points: 200" in response
+        # Storage usage of the circle
+        assert "Used: 50.00 MB" in response
+        assert "Available: 50.00 MB" in response
+        assert "Notification target: Telegram" in response
+        # The webhook URL may contain secrets and is not shown
+        assert "Circle webhook: configured" in response
+        assert "secret-token" not in response
+        assert "Created: 2025-01-01T00:00:00Z" in response
+
+    @pytest.mark.asyncio
+    async def test_get_user_profile_partial_data(self, httpx_mock: HTTPXMock, mock_login, call_tool):
+        """Profile is still shown when membership or storage cannot be fetched."""
+        httpx_mock.add_response(
+            url="https://donetick.test/api/v1/users/profile",
+            json={"res": {"id": 3, "username": "", "displayName": "Kid", "userType": 1}},
+        )
+        httpx_mock.add_response(
+            url="https://donetick.test/api/v1/circles/members",
+            json={"res": [
+                    {"id": 1, "userId": 1, "circleId": 10, "role": "admin", "isActive": True,
+                     "username": "alice", "displayName": "Alice Smith", "points": 300, "pointsRedeemed": 100},
+                    {"id": 2, "userId": 2, "circleId": 10, "role": "member", "isActive": True,
+                     "username": "", "displayName": "Bob", "points": 5, "pointsRedeemed": 0},
+                ]},
+        )
+        httpx_mock.add_response(
+            url="https://donetick.test/api/v1/users/storage",
+            status_code=404,
+            json={"error": "not found"},
+        )
+
+        result = await call_tool("get_user_profile", {})
+
+        assert not result.is_error
+        response = result[0].text
+        assert "User Profile for Kid" in response
+        assert "child account" in response
+        assert "Role and points: unavailable" in response
+        assert "💾 Storage (whole circle):\n  unavailable" in response
+        assert "Circle webhook: not configured" in response
 
     # ======================
     # COMPLEX CHORE CREATION TESTS (5 tests)

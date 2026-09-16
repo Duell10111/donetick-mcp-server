@@ -612,49 +612,75 @@ class CircleMember(BaseModel):
 
 
 class User(BaseModel):
-    """User model for circle members."""
+    """User as returned by GET /api/v1/users/.
+
+    Donetick's user objects carry no circle role or points; those come from
+    GET /api/v1/circles/members (CircleMember).
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
     id: int = Field(..., description="User ID")
-    username: str = Field(..., description="Username")
+    username: str = Field("", description="Username (can be empty)")
     displayName: Optional[str] = Field(None, description="Display name")
     email: Optional[str] = Field(None, description="Email address")
-    role: Optional[str] = Field(None, description="User role in circle")
-    circleId: Optional[int] = Field(None, description="Primary circle ID")
+    circleId: Optional[int] = Field(
+        None, validation_alias=AliasChoices("circleID", "circleId"), description="Circle ID"
+    )
     image: Optional[str] = Field(None, description="Profile image URL")
-    points: Optional[int] = Field(0, description="Total points earned")
-    pointsRedeemed: Optional[int] = Field(0, description="Points redeemed")
-    isActive: Optional[bool] = Field(True, description="Whether user is active")
+    timezone: Optional[str] = Field(None, description="User timezone")
+    userType: Optional[int] = Field(None, description="0 = regular account, 1 = child account")
+    disabled: bool = Field(False, description="Whether the account is disabled")
+
+
+# Donetick enums (internal/notifier/model, internal/user/model)
+NOTIFICATION_PLATFORM_NAMES = {
+    0: "none",
+    1: "Telegram",
+    2: "Pushover",
+    3: "Webhook",
+    4: "Discord",
+    5: "Push (mobile app)",
+}
+AUTH_PROVIDER_NAMES = {0: "Donetick", 1: "OAuth2", 2: "Google", 3: "Apple"}
 
 
 class UserProfile(BaseModel):
-    """Detailed user profile model."""
+    """Current user as returned by GET /api/v1/users/profile.
+
+    Points and roles are not part of the profile (see CircleMember), storage usage
+    comes from GET /api/v1/users/storage.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
 
     id: int = Field(..., description="User ID")
-    username: str = Field(..., description="Username")
+    username: str = Field("", description="Username")
     displayName: Optional[str] = Field(None, description="Display name")
     email: Optional[str] = Field(None, description="Email address")
-    circleId: Optional[int] = Field(None, description="Primary circle ID")
-    image: Optional[str] = Field(None, description="Profile image URL")
-    points: Optional[int] = Field(0, description="Total points earned")
-    pointsRedeemed: Optional[int] = Field(0, description="Points redeemed")
-    isActive: Optional[bool] = Field(True, description="Whether user is active")
-    createdAt: Optional[str] = Field(None, description="Account creation timestamp")
-    updatedAt: Optional[str] = Field(None, description="Last update timestamp")
-    # Notification preferences
-    notificationTargets: Optional[dict[str, Any]] = Field(
-        None,
-        description="Notification target configuration"
+    provider: Optional[int] = Field(None, description="Login provider (0 = Donetick, 1 = OAuth2, 2 = Google, 3 = Apple)")
+    circleId: Optional[int] = Field(
+        None, validation_alias=AliasChoices("circleID", "circleId"), description="Circle ID"
     )
-    webhook: Optional[str] = Field(None, description="Webhook URL for notifications")
-    # Storage and limits
-    storageUsed: Optional[int] = Field(0, description="Storage used in bytes")
-    storageLimit: Optional[int] = Field(0, description="Storage limit in bytes")
-    # Additional metadata
-    metadata: Optional[dict[str, Any]] = Field(None, description="Additional user metadata")
+    image: Optional[str] = Field(None, description="Profile image URL")
+    timezone: Optional[str] = Field(None, description="User timezone")
+    userType: Optional[int] = Field(None, description="0 = regular account, 1 = child account")
+    mfaEnabled: bool = Field(False, description="Multi-factor authentication enabled")
+    disabled: bool = Field(False, description="Whether the account is disabled")
+    subscription: Optional[str] = Field(None, description="Subscription status (Donetick cloud / Plus)")
+    expiration: Optional[str] = Field(None, description="Subscription expiration")
+    createdAt: Optional[str] = Field(
+        None, validation_alias=AliasChoices("created_at", "createdAt"), description="Account creation timestamp"
+    )
+    updatedAt: Optional[str] = Field(
+        None, validation_alias=AliasChoices("updated_at", "updatedAt"), description="Last update timestamp"
+    )
+    notificationTarget: Optional[dict[str, Any]] = Field(
+        None,
+        validation_alias=AliasChoices("notification_target", "notificationTarget"),
+        description="Notification target ({type, target_id})",
+    )
+    webhookURL: Optional[str] = Field(None, description="Circle webhook URL")
 
 
 class ChoreHistory(BaseModel):

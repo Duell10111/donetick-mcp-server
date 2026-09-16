@@ -117,6 +117,10 @@ Verify behavior against the Donetick source (`internal/chore/handler.go`, `inter
 - `GET /{id}/history?offset=` requires `offset`, returns 10 entries per page. `DELETE /{id}` returns 405 while chores are linked.
 - Create chores with triggers only after validating the thing (`build_thing_trigger()`): Donetick saves the chore before linking the thing and returns an error afterwards.
 
+**Users**
+- `GET /api/v1/users/` and `/users/profile` return user objects without circle role, points or active flag (only `disabled`); role and points come from `GET /api/v1/circles/members`, storage usage from `GET /api/v1/users/storage` (`{used, total}` in bytes, per circle).
+- User JSON mixes casing: `circleID`, `created_at`, `updated_at`, `notification_target`, `webhookURL`.
+
 **Other**
 - `GET /api/v1/projects` returns a plain array (no `res` wrapper).
 - Donetick has no panic recovery middleware: invalid requests can end in a dropped connection instead of a 4xx.

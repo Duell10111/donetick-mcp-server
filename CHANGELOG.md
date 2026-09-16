@@ -5,6 +5,12 @@ All notable changes to the Donetick MCP Server will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-09-17
+
+### Fixed
+- **`list_circle_users` showed invented roles and points**: Donetick's user objects contain neither, so every user was listed as "member" with 0 points. The tool now shows the real account data (account type, timezone, disabled state) and refers to `get_circle_members` for roles and points.
+- **`get_user_profile` showed placeholder values**: points, storage and the active flag are not part of Donetick's profile, the webhook field is `webhookURL` and timestamps are `created_at`/`updated_at`. The profile now matches Donetick's response, takes role and points from the circle membership and storage usage from `GET /api/v1/users/storage`, and shows the notification target. The webhook URL is only reported as configured, since it may contain secrets.
+
 ## [0.5.1] - 2026-09-16
 
 Fixes found while testing 0.5.0 against a live Donetick instance.
