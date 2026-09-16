@@ -14,7 +14,7 @@ Dazu gehören das Dependency-Update und eine überarbeitete CLAUDE.md.
 |---|---|---|
 | 1 – Stabilisierung und Dependencies | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
 | 2 – JWT-Authentifizierung härten | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
-| 3 – Bugfixes und API-Kompatibilität | ✅ umgesetzt (2026-09-16), 3.9 offen | `chore/phase-1-2-deps-jwt` |
+| 3 – Bugfixes und API-Kompatibilität | ✅ umgesetzt (2026-09-16), inkl. 3.9 | `chore/phase-1-2-deps-jwt` |
 | 4 – Things-Integration | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
 | 5–6 | offen | – |
 | 7 – API-Token | zurückgestellt | – |
@@ -49,8 +49,20 @@ Zusätzlich gefundene und behobene Inkompatibilitäten (alle im Donetick-Code `v
 Bewusste Abweichungen vom Plan:
 - **3.8 `update_chore_assignee`** bleibt beim Full-PUT: `PUT /{id}/assignee` akzeptiert nur User, die schon in `assignees` stehen. Das Tool ersetzt die Zuweisung aber komplett.
 - **3.8 Due Date:** `PUT /{id}/dueDate` wird nur genutzt, wenn `nextDueDate` die einzige Änderung ist (dann als „rescheduled“ in der Historie).
-- **3.9 (optionale Chore-Tools)** nicht umgesetzt; die Entscheidung ist weiter offen.
+- **3.9 (optionale Chore-Tools)** zunächst zurückgestellt, dann nachgezogen (siehe unten).
 - **Thing-Trigger bei `update_chore`:** `frequencyType` wird nicht automatisch auf `trigger` gesetzt (nur bei `create_chore`), damit ein bestehender Zeitplan nicht stillschweigend geändert wird.
+
+Ergebnis 3.9 (zusätzliche Chore-Tools): 10 neue Tools, insgesamt **36 Tools**, **300 passed**
+(neue Testdatei `tests/test_chore_actions.py`, 18 Tests):
+`list_archived_chores`, `archive_chore`, `unarchive_chore`, `undo_chore_action`, `approve_chore`,
+`reject_chore`, `start_chore_timer`, `pause_chore_timer`, `nudge_chore`, `list_projects`,
+dazu `project_id` bei `create_chore` bzw. `projectId` bei `update_chore`.
+- Umbenennung: `undo_chore_completion` → **`undo_chore_action`**, da Donetick auch Skip, Approval-Einreichung und Ablehnung rückgängig macht (nur eigene Aktion, max. 5 Minuten).
+- **Keine automatischen Wiederholungen** bei `nudge`, `undo`, `approve`, `reject`, Timer und Archivierung (neuer Parameter `retry_server_errors` in `_request`). Ein Timeout oder 5xx kann schon angewendet worden sein, z. B. ein doppelter Push. Die Re-Authentifizierung nach `401` bleibt.
+- Archivieren/Wiederherstellen darf nur der Ersteller. Donetick antwortet sonst mit `500`; der Client meldet das verständlich.
+- `_request` liefert `{}` bei `200` ohne Body (kommt bei `PUT /start` vor, wenn ein pausierter Chore keine Session hat).
+- `GET /api/v1/projects` liefert ein nacktes Array statt `{"res": …}`. Projekte anlegen/ändern ist bewusst nicht umgesetzt.
+- `403`-Fehler zeigen jetzt die Donetick-Meldung an (z. B. „Only admins can approve chores“).
 
 Offen / neu entdeckt:
 - `deadlineOffset` bzw. `deadline_offset` existiert in Donetick `v0.1.79` nicht (kein Feld in `ChoreReq`) und wird ignoriert. Entfernen oder dokumentieren (Phase 6).

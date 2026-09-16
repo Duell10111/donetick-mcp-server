@@ -21,6 +21,7 @@ from .models import (
     ChoreUpdate,
     CircleMember,
     Label,
+    Project,
     Thing,
     ThingCreate,
     ThingHistory,
@@ -359,6 +360,7 @@ class DonetickClient:
         method: str,
         path: str,
         max_retries: int = 3,
+        retry_server_errors: bool = True,
         **kwargs: Any,
     ) -> dict[str, Any] | list[Any]:
         """
@@ -367,6 +369,9 @@ class DonetickClient:
         Args:
             method: HTTP method (GET, POST, PUT, DELETE)
             path: API endpoint path
+            retry_server_errors: Retry on timeouts and 5xx errors. Disable for actions
+                that must not run twice (e.g. sending a nudge), since a timed out or
+                failed request may still have been applied
             max_retries: Maximum number of retry attempts
             **kwargs: Additional arguments for httpx request
 
@@ -419,6 +424,10 @@ class DonetickClient:
                 # Raise for other HTTP errors
                 response.raise_for_status()
 
+                # Some endpoints answer 200 without a body
+                if not response.content:
+                    return {}
+
                 # Parse JSON response with error handling
                 try:
                     return response.json()
@@ -427,7 +436,7 @@ class DonetickClient:
                     raise ValueError(f"Invalid JSON response from API: {e}") from e
 
             except httpx.TimeoutException as e:
-                if attempt == max_retries - 1:
+                if not retry_server_errors or attempt == max_retries - 1:
                     logger.error(f"Request timeout after {max_retries} attempts: {e}")
                     raise
 
@@ -446,7 +455,7 @@ class DonetickClient:
                     raise
 
                 # Retry server errors (5xx)
-                if attempt == max_retries - 1:
+                if not retry_server_errors or attempt == max_retries - 1:
                     logger.error(f"Server error after {max_retries} attempts: {e}")
                     raise
 
@@ -1059,6 +1068,187 @@ class DonetickClient:
         chore_detail = ChoreDetail(**detail_data)
         logger.info(f"Retrieved details for chore {chore_id}: {chore_detail.name}")
         return chore_detail
+
+    # ==================== CHORE ACTIONS ====================
+
+    async def _chore_after_action(self, chore_id: int, data: Any) -> Chore:
+        """Return the chore from an action response, fetching it if the response has none."""
+        if isinstance(data, dict) and isinstance(data.get("res"), dict) and "name" in data["res"]:
+            return Chore(**data["res"])
+        chore = await self.get_chore(chore_id)
+        if chore is None:
+            raise ValueError(f"Chore {chore_id} not found")
+        return chore
+
+    async def list_archived_chores(self) -> list[Chore]:
+        """
+        List archived chores.
+
+        Donetick archives chores by deactivating them (isActive=false).
+
+        Returns:
+            List of archived Chore objects
+        """
+        logger.info("Fetching archived chores")
+        data = await self._request("GET", "/api/v1/chores/archived")
+        chores_list = data.get("res", []) if isinstance(data, dict) else data
+        return [Chore(**chore) for chore in chores_list or []]
+
+    async def _set_archived(self, chore_id: int, archived: bool) -> Chore:
+        action = "archive" if archived else "unarchive"
+        logger.info(f"{action.capitalize()} chore {chore_id}")
+        try:
+            await self._request(
+                "PUT", f"/api/v1/chores/{chore_id}/{action}", retry_server_errors=False
+            )
+        except httpx.HTTPStatusError as e:
+            # Donetick answers 500 when the chore does not exist or was created by someone else
+            if e.response.status_code == 500:
+                raise ValueError(
+                    f"Could not {action} chore {chore_id}. "
+                    f"Only the creator of a chore can {action} it."
+                ) from e
+            raise
+        return await self._chore_after_action(chore_id, None)
+
+    async def archive_chore(self, chore_id: int) -> Chore:
+        """
+        Archive a chore (creator only). Archived chores are inactive and get no notifications.
+
+        Returns:
+            Archived Chore object
+        """
+        return await self._set_archived(chore_id, True)
+
+    async def unarchive_chore(self, chore_id: int) -> Chore:
+        """
+        Restore an archived chore (creator only).
+
+        Returns:
+            Restored Chore object
+        """
+        return await self._set_archived(chore_id, False)
+
+    async def undo_chore_action(self, chore_id: int) -> tuple[str, Chore]:
+        """
+        Undo your last completion, skip, approval submission or rejection of a chore.
+
+        Donetick only allows undoing your own action within 5 minutes.
+
+        Returns:
+            Tuple of Donetick's message (e.g. "Successfully undid completion action")
+            and the restored Chore
+        """
+        logger.info(f"Undoing last action on chore {chore_id}")
+        data = await self._request(
+            "POST", f"/api/v1/chores/{chore_id}/undo", retry_server_errors=False
+        )
+        message = data.get("message", "Action undone") if isinstance(data, dict) else "Action undone"
+        return message, await self._chore_after_action(chore_id, data)
+
+    async def approve_chore(self, chore_id: int) -> Chore:
+        """
+        Approve a completion pending approval (circle admins and managers only).
+
+        Returns:
+            Updated Chore object with its next due date
+        """
+        logger.info(f"Approving chore {chore_id}")
+        data = await self._request(
+            "POST", f"/api/v1/chores/{chore_id}/approve", json={}, retry_server_errors=False
+        )
+        return await self._chore_after_action(chore_id, data)
+
+    async def reject_chore(self, chore_id: int, notes: Optional[str] = None) -> Chore:
+        """
+        Reject a completion pending approval (circle admins and managers only).
+
+        Args:
+            chore_id: Chore ID
+            notes: Reason for the rejection
+
+        Returns:
+            Updated Chore object
+        """
+        logger.info(f"Rejecting chore {chore_id}")
+        # Donetick requires a JSON body here
+        payload = {"notes": notes} if notes else {}
+        data = await self._request(
+            "POST",
+            f"/api/v1/chores/{chore_id}/reject",
+            json=payload,
+            retry_server_errors=False,
+        )
+        return await self._chore_after_action(chore_id, data)
+
+    async def _timer_action(self, chore_id: int, action: str) -> tuple[Chore, dict[str, Any]]:
+        logger.info(f"Timer {action} for chore {chore_id}")
+        data = await self._request(
+            "PUT", f"/api/v1/chores/{chore_id}/{action}", json={}, retry_server_errors=False
+        )
+        timer = data.get("res", {}) if isinstance(data, dict) else {}
+        return await self._chore_after_action(chore_id, None), timer or {}
+
+    async def start_chore_timer(self, chore_id: int) -> tuple[Chore, dict[str, Any]]:
+        """
+        Start or resume time tracking on a chore (sets status to in progress).
+
+        Returns:
+            Tuple of the Chore and timer info (status, duration in seconds, timerUpdatedAt)
+        """
+        return await self._timer_action(chore_id, "start")
+
+    async def pause_chore_timer(self, chore_id: int) -> tuple[Chore, dict[str, Any]]:
+        """
+        Pause time tracking on a chore.
+
+        Returns:
+            Tuple of the Chore and timer info (status, duration in seconds, timerUpdatedAt)
+        """
+        return await self._timer_action(chore_id, "pause")
+
+    async def nudge_chore(
+        self,
+        chore_id: int,
+        all_assignees: bool = False,
+        message: Optional[str] = None,
+    ) -> tuple[str, list[str]]:
+        """
+        Send a push notification reminding the assignee(s) about a chore.
+
+        Args:
+            chore_id: Chore ID
+            all_assignees: Nudge all assignees instead of only the current assignee
+            message: Optional custom message
+
+        Returns:
+            Tuple of Donetick's result message and warnings for users that could not be reached
+        """
+        logger.info(f"Nudging chore {chore_id} (all_assignees={all_assignees})")
+        payload: dict[str, Any] = {"all_assignees": all_assignees}
+        if message:
+            payload["message"] = message
+        data = await self._request(
+            "POST",
+            f"/api/v1/chores/{chore_id}/nudge",
+            json=payload,
+            retry_server_errors=False,
+        )
+        data = data if isinstance(data, dict) else {}
+        return data.get("message", "Nudge sent"), data.get("warnings") or []
+
+    async def list_projects(self) -> list[Project]:
+        """
+        List the projects of the circle.
+
+        Returns:
+            List of Project objects
+        """
+        logger.info("Fetching projects")
+        data = await self._request("GET", "/api/v1/projects")
+        # This endpoint returns a plain array instead of {"res": [...]}
+        projects = data.get("res", []) if isinstance(data, dict) else data
+        return [Project(**project) for project in projects or []]
 
     # ==================== THINGS ====================
 

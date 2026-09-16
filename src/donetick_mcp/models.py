@@ -818,6 +818,20 @@ class ChoreDetail(BaseModel):
             )
 
 
+class Project(BaseModel):
+    """Project grouping chores within a circle."""
+
+    id: int = Field(..., description="Project ID")
+    name: str = Field(..., description="Project name")
+    description: Optional[str] = Field(None, description="Project description")
+    color: Optional[str] = Field(None, description="Project color")
+    icon: Optional[str] = Field(None, description="Project icon")
+    circleId: Optional[int] = Field(None, description="Circle ID")
+    isDefault: bool = Field(False, description="Whether this is the circle's default project")
+    createdAt: Optional[str] = Field(None, description="Creation timestamp (ISO 8601)")
+    updatedAt: Optional[str] = Field(None, description="Last update timestamp (ISO 8601)")
+
+
 class ThingChore(BaseModel):
     """Link between a thing and a chore it triggers."""
 

@@ -50,7 +50,7 @@ class TestMCPServer:
         """Test listing available tools."""
         tools = await list_tools()
 
-        assert len(tools) == 26  # 10 chore + 4 label + 3 user/member + 3 history + 6 thing tools
+        assert len(tools) == 36  # 10 chore + 4 label + 3 user/member + 3 history + 10 action/project + 6 thing tools
         tool_names = [tool.name for tool in tools]
         # Chore tools (10 total)
         assert "list_chores" in tool_names
@@ -76,6 +76,20 @@ class TestMCPServer:
         assert "get_chore_history" in tool_names
         assert "get_all_chores_history" in tool_names
         assert "get_chore_details" in tool_names
+        # Chore action and project tools (10 total)
+        for action_tool in (
+            "list_archived_chores",
+            "archive_chore",
+            "unarchive_chore",
+            "undo_chore_action",
+            "approve_chore",
+            "reject_chore",
+            "start_chore_timer",
+            "pause_chore_timer",
+            "nudge_chore",
+            "list_projects",
+        ):
+            assert action_tool in tool_names
         # Thing tools (6 total)
         for thing_tool in (
             "list_things",
