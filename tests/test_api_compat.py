@@ -222,6 +222,128 @@ class TestUpdateChore:
         assert httpx_mock.get_request(url=CHORES_URL, method="PUT") is None
 
 
+class TestUpdateChoreRelations:
+    """Assignees, labels and sub-tasks via the full chore update."""
+
+    CHORE_WITH_RELATIONS = {
+        **CHORE,
+        "labelsV2": [{"id": 7, "name": "Kitchen", "color": "#fff", "created_by": 5}],
+        "subTasks": [
+            {"id": 11, "name": "Wipe table", "orderId": 0, "completedAt": None, "completedBy": 0, "parentId": None},
+            {"id": 12, "name": "Mop floor", "orderId": 1, "completedAt": None, "completedBy": 0, "parentId": None},
+        ],
+    }
+
+    def _mock_update(self, httpx_mock: HTTPXMock, updated: dict):
+        httpx_mock.add_response(url=CHORE_URL, json={"res": self.CHORE_WITH_RELATIONS})
+        httpx_mock.add_response(url=CHORES_URL, method="PUT", json={"message": "ok"})
+        httpx_mock.add_response(url=CHORE_URL, json={"res": updated})
+
+    async def test_subtasks_added_and_removed(self, client, httpx_mock: HTTPXMock, login):
+        self._mock_update(httpx_mock, self.CHORE_WITH_RELATIONS)
+
+        async with client:
+            await client.update_chore(
+                1, ChoreUpdate(), add_subtask_names=["Empty bin"], remove_subtask_ids=[11]
+            )
+
+        subtasks = _put_payload(httpx_mock)["subTasks"]
+        # Existing sub-tasks must be sent again, otherwise Donetick deletes them
+        assert [s["id"] for s in subtasks] == [12, -1]
+        assert subtasks[1] == {
+            "id": -1,
+            "name": "Empty bin",
+            "orderId": 2,
+            "completedAt": None,
+            "completedBy": 0,
+            "parentId": None,
+        }
+
+    async def test_unknown_subtask_id(self, client, httpx_mock: HTTPXMock, login):
+        httpx_mock.add_response(url=CHORE_URL, json={"res": self.CHORE_WITH_RELATIONS})
+
+        async with client:
+            with pytest.raises(ValueError, match="Sub-task.*99 not found"):
+                await client.update_chore(1, ChoreUpdate(), remove_subtask_ids=[99])
+
+        assert httpx_mock.get_request(url=CHORES_URL, method="PUT") is None
+
+    async def test_assignees_replaced_and_assigned_to_follows(
+        self, client, httpx_mock: HTTPXMock, login
+    ):
+        """The current assignee (5) is not in the new list, so the first new one is used."""
+        self._mock_update(httpx_mock, {**self.CHORE_WITH_RELATIONS, "assignedTo": 6})
+
+        async with client:
+            await client.update_chore(1, ChoreUpdate(assignees=[{"userId": 6}, {"userId": 7}]))
+
+        payload = _put_payload(httpx_mock)
+        assert payload["assignees"] == [{"userId": 6}, {"userId": 7}]
+        assert payload["assignedTo"] == 6
+        # Existing sub-tasks are sent back unchanged
+        assert [s["id"] for s in payload["subTasks"]] == [11, 12]
+
+    async def test_assignees_keep_current_assignee(self, client, httpx_mock: HTTPXMock, login):
+        self._mock_update(httpx_mock, self.CHORE_WITH_RELATIONS)
+
+        async with client:
+            await client.update_chore(1, ChoreUpdate(assignees=[{"userId": 6}, {"userId": 5}]))
+
+        assert _put_payload(httpx_mock)["assignedTo"] == 5
+
+    async def test_update_chore_tool_relations(self, call_tool, httpx_mock: HTTPXMock):
+        httpx_mock.add_response(
+            url=f"{BASE_URL}/api/v1/circles/members",
+            json={
+                "res": [
+                    {"id": 1, "userId": 5, "circleId": 1, "role": "admin", "isActive": True,
+                     "username": "me"},
+                    {"id": 2, "userId": 2, "circleId": 1, "role": "member", "isActive": True,
+                     "username": "", "displayName": "Konstantin"},
+                ]
+            },
+        )
+        httpx_mock.add_response(
+            url=f"{BASE_URL}/api/v1/labels",
+            json={"res": [{"id": 7, "name": "Kitchen"}, {"id": 8, "name": "Weekly"}]},
+        )
+        # Label 7 was added by another user, so Donetick keeps it
+        self._mock_update(
+            httpx_mock,
+            {
+                **self.CHORE_WITH_RELATIONS,
+                "assignedTo": 2,
+                "labelsV2": [{"id": 7, "name": "Kitchen"}, {"id": 8, "name": "Weekly"}],
+            },
+        )
+
+        result = await call_tool(
+            "update_chore",
+            {
+                "chore_id": 1,
+                "usernames": ["Konstantin"],
+                "label_names": ["Weekly"],
+                "add_subtask_names": ["Empty bin"],
+            },
+        )
+
+        assert not result.is_error
+        payload = _put_payload(httpx_mock)
+        assert payload["assignees"] == [{"userId": 2}]
+        assert payload["assignedTo"] == 2
+        assert payload["labelsV2"] == [{"id": 8}]
+        assert [s["id"] for s in payload["subTasks"]] == [11, 12, -1]
+        assert "Label(s) not removed: Kitchen" in result[0].text
+
+    async def test_update_chore_tool_conflicting_arguments(self, call_tool):
+        result = await call_tool(
+            "update_chore", {"chore_id": 1, "usernames": ["a"], "assignee_ids": [1]}
+        )
+
+        assert result.is_error
+        assert "either usernames or assignee_ids" in result[0].text
+
+
 class TestChoreActions:
     """Dedicated chore action endpoints."""
 

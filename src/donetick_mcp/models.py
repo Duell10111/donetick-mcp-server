@@ -511,7 +511,8 @@ class ChoreUpdate(BaseModel):
 
     # Assignment
     assignStrategy: Optional[str] = Field(None, description="Assignment strategy")
-    assignees: Optional[list[dict[str, int]]] = Field(None, description="List of assignees with userId")
+    assignees: Optional[list[dict[str, int]]] = Field(None, description="List of assignees with userId (replaces all)")
+    assignedTo: Optional[int] = Field(None, description="Current assignee (must be one of the assignees)")
 
     # Notifications
     notification: Optional[bool] = Field(None, description="Enable notifications")

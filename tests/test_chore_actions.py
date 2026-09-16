@@ -9,6 +9,7 @@ from donetick_mcp.client import DonetickClient
 
 BASE_URL = "https://donetick.test"
 CHORE_URL = f"{BASE_URL}/api/v1/chores/1"
+CHORES_URL = f"{BASE_URL}/api/v1/chores/"
 
 CHORE = {
     "id": 1,
@@ -26,6 +27,34 @@ CHORE = {
     "status": 0,
     "priority": 2,
 }
+
+
+def _mock_archive_refused(httpx_mock: HTTPXMock):
+    """Donetick answers 500 when a user archives a chore they did not create."""
+    httpx_mock.add_response(
+        url=f"{CHORE_URL}/archive",
+        method="PUT",
+        status_code=500,
+        json={"error": "Error archiving chore"},
+    )
+
+
+def _mock_me_and_members(httpx_mock: HTTPXMock, my_role: str):
+    httpx_mock.add_response(
+        url=f"{BASE_URL}/api/v1/users/profile",
+        json={"res": {"id": 5, "username": "me", "displayName": "Me"}},
+    )
+    httpx_mock.add_response(
+        url=f"{BASE_URL}/api/v1/circles/members",
+        json={
+            "res": [
+                {"id": 1, "userId": 5, "circleId": 1, "role": my_role, "isActive": True,
+                 "username": "me"},
+                {"id": 2, "userId": 2, "circleId": 1, "role": "member", "isActive": True,
+                 "username": "other"},
+            ]
+        },
+    )
 
 
 @pytest.fixture
@@ -58,23 +87,45 @@ class TestArchive:
         httpx_mock.add_response(url=CHORE_URL, json={"res": {**CHORE, "isActive": False}})
 
         async with client:
-            chore = await client.archive_chore(1)
+            chore, via_update = await client.archive_chore(1)
 
         assert chore.isActive is False
+        assert via_update is False
 
-    async def test_archive_not_creator_is_not_retried(self, client, httpx_mock: HTTPXMock, login):
+    async def test_archive_other_users_chore_as_admin(self, client, httpx_mock: HTTPXMock, login):
+        """Donetick only lets the creator archive; admins fall back to a regular update."""
+        others_chore = {**CHORE, "createdBy": 2, "notification": True}
+        _mock_archive_refused(httpx_mock)
+        httpx_mock.add_response(url=CHORE_URL, json={"res": others_chore})  # fallback check
+        _mock_me_and_members(httpx_mock, my_role="admin")
+        httpx_mock.add_response(url=CHORE_URL, json={"res": others_chore})  # update_chore fetch
+        httpx_mock.add_response(url=CHORES_URL, method="PUT", json={"message": "ok"})
         httpx_mock.add_response(
-            url=f"{CHORE_URL}/archive",
-            method="PUT",
-            status_code=500,
-            json={"error": "Error archiving chore"},
+            url=CHORE_URL, json={"res": {**others_chore, "isActive": False, "notification": False}}
         )
 
         async with client:
-            with pytest.raises(ValueError, match="Only the creator"):
+            chore, via_update = await client.archive_chore(1)
+
+        assert via_update is True
+        assert chore.isActive is False
+        payload = json.loads(httpx_mock.get_request(url=CHORES_URL, method="PUT").content)
+        assert payload["isActive"] is False
+        # Donetick keeps sending notifications of chores deactivated via update
+        assert payload["notification"] is False
+        # Refused archive request is not retried
+        assert len(httpx_mock.get_requests(url=f"{CHORE_URL}/archive")) == 1
+
+    async def test_archive_other_users_chore_not_admin(self, client, httpx_mock: HTTPXMock, login):
+        _mock_archive_refused(httpx_mock)
+        httpx_mock.add_response(url=CHORE_URL, json={"res": {**CHORE, "createdBy": 2}})
+        _mock_me_and_members(httpx_mock, my_role="member")
+
+        async with client:
+            with pytest.raises(ValueError, match="only its creator or a circle admin"):
                 await client.archive_chore(1)
 
-        assert len(httpx_mock.get_requests(url=f"{CHORE_URL}/archive")) == 1
+        assert httpx_mock.get_request(url=CHORES_URL, method="PUT") is None
 
     async def test_list_archived(self, client, httpx_mock: HTTPXMock, login):
         httpx_mock.add_response(
@@ -98,6 +149,22 @@ class TestArchive:
         result = await call_tool("unarchive_chore", {"chore_id": 1})
 
         assert "Successfully unarchived chore 'Vacuum'" in result[0].text
+        assert "circle admin" not in result[0].text
+
+    async def test_archive_tool_explains_admin_fallback(self, call_tool, httpx_mock: HTTPXMock):
+        others_chore = {**CHORE, "createdBy": 2}
+        _mock_archive_refused(httpx_mock)
+        httpx_mock.add_response(url=CHORE_URL, json={"res": others_chore})
+        _mock_me_and_members(httpx_mock, my_role="admin")
+        httpx_mock.add_response(url=CHORE_URL, json={"res": others_chore})
+        httpx_mock.add_response(url=CHORES_URL, method="PUT", json={"message": "ok"})
+        httpx_mock.add_response(url=CHORE_URL, json={"res": {**others_chore, "isActive": False}})
+
+        result = await call_tool("archive_chore", {"chore_id": 1})
+
+        assert not result.is_error
+        assert "Active: False" in result[0].text
+        assert "notifications were turned off" in result[0].text
 
 
 class TestUndoAndApproval:

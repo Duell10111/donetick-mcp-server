@@ -137,7 +137,7 @@ The server logs in with username and password (`POST /api/v1/auth/login`) and ke
 | `list_chores` | List chores | `filter_active`, `assigned_to_user_id`, `detail_level` (`brief`/`full`) |
 | `get_chore` | Chore details incl. sub-tasks and thing trigger | `chore_id` |
 | `create_chore` | Create a chore | `name`, `due_date`, `frequency_type`, `days_of_week`, `time_of_day`, `timezone`, `usernames`, `label_names`, `priority`, `points`, `subtask_names`, `remind_minutes_before`, `thing_id`, `project_id`, … |
-| `update_chore` | Change chore fields (only given fields change) | `chore_id`, `name`, `description`, `next_due_date`, `priority`, `frequency_type`, `is_private`, `thing_id`, `remove_thing_trigger`, … |
+| `update_chore` | Change chore fields (only given fields change) | `chore_id`, `name`, `description`, `next_due_date`, `priority`, `frequency_type`, `is_private`, `usernames`/`assignee_ids`, `label_names`/`label_ids`, `add_subtask_names`, `remove_subtask_ids`, `thing_id`, `remove_thing_trigger`, … |
 | `complete_chore` | Mark as done | `chore_id`, `notes`, `completed_at`, `completed_by` (admins) |
 | `skip_chore` | Skip the current occurrence | `chore_id` |
 | `update_chore_priority` | Set priority 0–4 | `chore_id`, `priority` |
@@ -150,7 +150,7 @@ The server logs in with username and password (`POST /api/v1/auth/login`) and ke
 | Tool | Description | Key parameters |
 |------|-------------|----------------|
 | `list_archived_chores` | List archived chores | – |
-| `archive_chore` / `unarchive_chore` | Archive or restore (creator only) | `chore_id` |
+| `archive_chore` / `unarchive_chore` | Archive or restore (creator; circle admins via a regular update that also turns off notifications) | `chore_id` |
 | `undo_chore_action` | Undo your last completion, skip, approval submission or rejection (within 5 minutes) | `chore_id` |
 | `approve_chore` / `reject_chore` | Decide on completions pending approval (admins and managers) | `chore_id`, `notes` (reject) |
 | `start_chore_timer` / `pause_chore_timer` | Time tracking | `chore_id` |

@@ -34,17 +34,31 @@ def register(mcp: MCPServer) -> None:
     async def archive_chore(ctx: Context, chore_id: ChoreId) -> str:
         """Archive a chore instead of deleting it: it becomes inactive and sends no notifications.
 
-        Only the chore creator can archive it. Restore with unarchive_chore.
+        Works for the chore creator. Circle admins can also archive chores of other users; Donetick
+        does not allow this directly, so the chore is deactivated with a regular update and its
+        notifications are turned off. Restore with unarchive_chore.
         """
-        chore = await get_client(ctx).archive_chore(chore_id)
-        return f"Successfully archived chore '{chore.name}' (ID: {chore.id}). Active: {chore.isActive}"
+        chore, via_update = await get_client(ctx).archive_chore(chore_id)
+        text = f"Successfully archived chore '{chore.name}' (ID: {chore.id}). Active: {chore.isActive}"
+        if via_update:
+            text += (
+                "\n\nℹ️ Donetick only lets the creator archive a chore, so as circle admin it was "
+                "deactivated with a regular update and its notifications were turned off."
+            )
+        return text
 
     @mcp.tool(annotations=IDEMPOTENT_WRITE, structured_output=False)
     @handle_errors
     async def unarchive_chore(ctx: Context, chore_id: ChoreId) -> str:
-        """Restore an archived chore. Only the chore creator can unarchive it."""
-        chore = await get_client(ctx).unarchive_chore(chore_id)
-        return f"Successfully unarchived chore '{chore.name}' (ID: {chore.id}). Active: {chore.isActive}"
+        """Restore an archived chore (creator, or circle admins via a regular update)."""
+        chore, via_update = await get_client(ctx).unarchive_chore(chore_id)
+        text = f"Successfully unarchived chore '{chore.name}' (ID: {chore.id}). Active: {chore.isActive}"
+        if via_update:
+            text += (
+                "\n\nℹ️ Restored as circle admin with a regular update. Notifications are "
+                f"{'on' if chore.notification else 'off'}; enable them with update_chore if needed."
+            )
+        return text
 
     @mcp.tool(annotations=WRITE, structured_output=False)
     @handle_errors

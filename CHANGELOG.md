@@ -5,6 +5,12 @@ All notable changes to the Donetick MCP Server will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-09-17
+
+### Added
+- `update_chore` can change assignees (`usernames` or `assignee_ids`, optional `assigned_to`), labels (`label_names` or `label_ids`) and sub-tasks (`add_subtask_names`, `remove_subtask_ids`). Existing sub-tasks are kept; the response reports labels Donetick did not remove because another user added them.
+- `archive_chore`/`unarchive_chore` work for circle admins on chores of other users: Donetick's archive endpoints only accept the creator, so the chore is (de)activated with a regular update instead, and notifications are turned off when archiving (Donetick keeps sending them for chores deactivated via update).
+
 ## [0.5.2] - 2026-09-17
 
 ### Fixed

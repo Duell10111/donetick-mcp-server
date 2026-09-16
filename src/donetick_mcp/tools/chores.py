@@ -487,7 +487,13 @@ def register(mcp: MCPServer) -> None:
             int | None, Field(ge=0, le=4, description="Priority level (0=unset, 1=lowest, 4=highest)")
         ] = None,
         points: Annotated[int | None, Field(ge=0, description="Points awarded for completion")] = None,
-        is_active: Annotated[bool | None, Field(description="Enable/disable chore")] = None,
+        is_active: Annotated[
+            bool | None,
+            Field(
+                description="Enable/disable chore. To take a chore out of use, prefer archive_chore: "
+                "deactivating via update keeps sending its notifications"
+            ),
+        ] = None,
         is_private: Annotated[bool | None, Field(description="Hide from other circle members")] = None,
         require_approval: Annotated[
             bool | None, Field(description="Requires approval to mark complete")
@@ -533,14 +539,55 @@ def register(mcp: MCPServer) -> None:
         remove_thing_trigger: Annotated[
             bool, Field(description="Remove the chore's thing trigger (existing triggers are kept otherwise)")
         ] = False,
+        usernames: Annotated[
+            list[str] | None,
+            Field(
+                description="Replace all assignees by usernames or display names (e.g. ['Alice', 'Bob']). "
+                "Use either usernames or assignee_ids."
+            ),
+        ] = None,
+        assignee_ids: Annotated[
+            list[int] | None,
+            Field(description="Replace all assignees by user IDs (see get_circle_members)"),
+        ] = None,
+        assigned_to: Annotated[
+            int | None,
+            Field(
+                description="Current assignee (user ID). Defaults to the current assignee if still "
+                "assigned, otherwise the first of the new assignees"
+            ),
+        ] = None,
+        label_names: Annotated[
+            list[str] | None,
+            Field(
+                description="Replace the chore's labels by name ([] removes all). "
+                "Use either label_names or label_ids."
+            ),
+        ] = None,
+        label_ids: Annotated[
+            list[int] | None,
+            Field(description="Replace the chore's labels by ID (see list_labels, [] removes all)"),
+        ] = None,
+        add_subtask_names: Annotated[
+            list[str] | None,
+            Field(description="Sub-tasks to append; existing sub-tasks are kept"),
+        ] = None,
+        remove_subtask_ids: Annotated[
+            list[int] | None,
+            Field(description="IDs of sub-tasks to delete (see get_chore)"),
+        ] = None,
     ) -> str:
         """Update an existing chore with new values.
 
         Can modify any chore property including name, description, schedule, priority, points,
-        privacy settings, project and thing trigger. Only provide fields you want to change -
-        other fields remain unchanged.
+        privacy settings, project, thing trigger, assignees, labels and sub-tasks. Only provide
+        fields you want to change - other fields remain unchanged.
         """
         client = get_client(ctx)
+        if usernames is not None and assignee_ids is not None:
+            raise ValueError("Use either usernames or assignee_ids, not both")
+        if label_names is not None and label_ids is not None:
+            raise ValueError("Use either label_names or label_ids, not both")
 
         update_data = {
             "name": name,
@@ -563,6 +610,36 @@ def register(mcp: MCPServer) -> None:
         }
         update_data = {key: value for key, value in update_data.items() if value is not None}
 
+        # ===== Assignees =====
+        if usernames is not None:
+            username_map = await client.lookup_user_ids(usernames)
+            missing = [u for u in usernames if u not in username_map]
+            if missing:
+                raise ToolError(
+                    f"Could not find user(s) in circle: {', '.join(missing)}\n\n"
+                    "💡 Hint: Use get_circle_members to see available users."
+                )
+            assignee_ids = [username_map[u] for u in usernames]
+        if assignee_ids is not None:
+            if not assignee_ids:
+                raise ValueError("A chore needs at least one assignee")
+            update_data["assignees"] = [{"userId": user_id} for user_id in dict.fromkeys(assignee_ids)]
+        if assigned_to is not None:
+            update_data["assignedTo"] = assigned_to
+
+        # ===== Labels =====
+        if label_names is not None:
+            label_map = await client.lookup_label_ids(label_names) if label_names else {}
+            missing_labels = [label for label in label_names if label not in label_map]
+            if missing_labels:
+                raise ToolError(
+                    f"Label(s) not found: {', '.join(missing_labels)}\n\n"
+                    "💡 Hint: Use list_labels to see available labels or create_label to add one."
+                )
+            label_ids = [label_map[label] for label in label_names]
+        if label_ids is not None:
+            update_data["labelsV2"] = [{"id": label_id} for label_id in dict.fromkeys(label_ids)]
+
         if thing_id is not None:
             if remove_thing_trigger:
                 raise ValueError("Use either thing_id or remove_thing_trigger, not both")
@@ -573,9 +650,23 @@ def register(mcp: MCPServer) -> None:
             )
 
         chore = await client.update_chore(
-            chore_id, ChoreUpdate(**update_data), remove_thing_trigger=remove_thing_trigger
+            chore_id,
+            ChoreUpdate(**update_data),
+            remove_thing_trigger=remove_thing_trigger,
+            add_subtask_names=add_subtask_names,
+            remove_subtask_ids=remove_subtask_ids,
         )
-        return _chore_text(f"Successfully updated chore '{chore.name}' (ID: {chore.id})", chore)
+
+        summary = f"Successfully updated chore '{chore.name}' (ID: {chore.id})"
+        if label_ids is not None:
+            # Donetick only removes label assignments made by the current user
+            kept = [label.name for label in chore.labelsV2 if label.id not in set(label_ids)]
+            if kept:
+                summary += (
+                    f"\n\n⚠️ Label(s) not removed: {', '.join(kept)}. Donetick only lets the user "
+                    "who added a label to a chore remove it again."
+                )
+        return _chore_text(summary, chore)
 
     @mcp.tool(annotations=DESTRUCTIVE, structured_output=False)
     @handle_errors

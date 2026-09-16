@@ -629,14 +629,20 @@ class DonetickClient:
         chore_id: int,
         update: ChoreUpdate,
         remove_thing_trigger: bool = False,
+        add_subtask_names: Optional[list[str]] = None,
+        remove_subtask_ids: Optional[list[int]] = None,
     ) -> Chore:
         """
         Update an existing chore.
 
         Args:
             chore_id: Chore ID to update
-            update: ChoreUpdate object with fields to update
+            update: ChoreUpdate object with fields to update. assignees and labelsV2
+                replace the current values; if assignedTo is not given and the current
+                assignee is not in the new assignees, the first new assignee is used.
             remove_thing_trigger: Remove the chore's thing trigger
+            add_subtask_names: Sub-tasks to append (existing sub-tasks are kept)
+            remove_subtask_ids: IDs of sub-tasks to delete
 
         Returns:
             Updated Chore object
@@ -656,8 +662,9 @@ class DonetickClient:
             raise ValueError(f"Chore {chore_id} not found")
 
         update_fields = update.model_dump(exclude_none=True)
+        changes_subtasks = bool(add_subtask_names or remove_subtask_ids)
 
-        if set(update_fields) == {"nextDueDate"} and not remove_thing_trigger:
+        if set(update_fields) == {"nextDueDate"} and not remove_thing_trigger and not changes_subtasks:
             return await self.update_chore_due_date(
                 chore_id, update_fields["nextDueDate"], current_chore=current_chore
             )
@@ -667,6 +674,20 @@ class DonetickClient:
         chore_dict.update(update_fields)
         if remove_thing_trigger:
             chore_dict.pop("thingTrigger", None)
+
+        # New assignees without explicit assignedTo: keep the current assignee if still
+        # assigned, otherwise use the first new assignee
+        if "assignees" in update_fields and "assignedTo" not in update_fields:
+            new_ids = [a["userId"] for a in update_fields["assignees"]]
+            if not new_ids:
+                raise ValueError("A chore needs at least one assignee")
+            if current_chore.assignedTo not in new_ids:
+                chore_dict["assignedTo"] = new_ids[0]
+
+        if changes_subtasks:
+            chore_dict["subTasks"] = self._edit_subtasks(
+                chore_id, current_chore.subTasks, add_subtask_names or [], remove_subtask_ids or []
+            )
 
         # IMPORTANT API CONSTRAINT: If assignedTo is set, it MUST be in the assignees array
         # The API validates this and returns 400 "Assigned to not found in assignees" if violated
@@ -739,6 +760,44 @@ class DonetickClient:
 
         logger.info(f"Updated chore {chore_id}: {updated_chore.name}")
         return updated_chore
+
+    @staticmethod
+    def _edit_subtasks(
+        chore_id: int,
+        current: list[Any],
+        add_names: list[str],
+        remove_ids: list[int],
+    ) -> list[dict[str, Any]]:
+        """Build the full sub-task list for an update.
+
+        Donetick deletes every existing sub-task that is missing from the request and
+        creates sub-tasks with an ID <= 0, so existing ones are always sent back.
+        """
+        existing = [dict(subtask) for subtask in current or []]
+        existing_ids = {subtask.get("id") for subtask in existing}
+        unknown = [subtask_id for subtask_id in remove_ids if subtask_id not in existing_ids]
+        if unknown:
+            raise ValueError(
+                f"Sub-task(s) {', '.join(map(str, unknown))} not found in chore {chore_id}"
+            )
+
+        subtasks = [subtask for subtask in existing if subtask.get("id") not in set(remove_ids)]
+        next_order = max((subtask.get("orderId") or 0 for subtask in subtasks), default=-1) + 1
+        for index, name in enumerate(add_names):
+            if not name.strip():
+                raise ValueError("Sub-task names must not be empty")
+            subtasks.append(
+                {
+                    # Negative temporary IDs mark new sub-tasks
+                    "id": -(index + 1),
+                    "name": name.strip(),
+                    "orderId": next_order + index,
+                    "completedAt": None,
+                    "completedBy": 0,
+                    "parentId": None,
+                }
+            )
+        return subtasks
 
     async def update_chore_due_date(
         self,
@@ -1102,7 +1161,7 @@ class DonetickClient:
         chores_list = data.get("res", []) if isinstance(data, dict) else data
         return [Chore(**chore) for chore in chores_list or []]
 
-    async def _set_archived(self, chore_id: int, archived: bool) -> Chore:
+    async def _set_archived(self, chore_id: int, archived: bool) -> tuple[Chore, bool]:
         action = "archive" if archived else "unarchive"
         logger.info(f"{action.capitalize()} chore {chore_id}")
         try:
@@ -1111,29 +1170,65 @@ class DonetickClient:
             )
         except httpx.HTTPStatusError as e:
             # Donetick answers 500 when the chore does not exist or was created by someone else
-            if e.response.status_code == 500:
-                raise ValueError(
-                    f"Could not {action} chore {chore_id}. "
-                    f"Only the creator of a chore can {action} it."
-                ) from e
-            raise
-        return await self._chore_after_action(chore_id, None)
+            if e.response.status_code != 500:
+                raise
+            return await self._set_archived_as_admin(chore_id, archived, e), True
+        return await self._chore_after_action(chore_id, None), False
 
-    async def archive_chore(self, chore_id: int) -> Chore:
+    async def _set_archived_as_admin(
+        self, chore_id: int, archived: bool, error: httpx.HTTPStatusError
+    ) -> Chore:
+        """Fallback when Donetick refuses to (un)archive a chore created by someone else.
+
+        The archive endpoints only accept the creator, but a regular edit is also allowed
+        for circle admins, and archiving only sets isActive. Notifications are turned off
+        when deactivating: Donetick re-plans and sends them for inactive chores after an
+        edit, while the archive endpoint deletes them.
         """
-        Archive a chore (creator only). Archived chores are inactive and get no notifications.
+        action = "archive" if archived else "unarchive"
+        chore = await self.get_chore(chore_id)
+        if chore is None:
+            raise ValueError(f"Chore {chore_id} not found") from error
+
+        profile = await self.get_user_profile()
+        if chore.createdBy == profile.id:
+            raise ValueError(f"Donetick could not {action} chore {chore_id}") from error
+
+        members = await self.get_circle_members()
+        if not any(m.userId == profile.id and m.role == "admin" for m in members):
+            raise ValueError(
+                f"Could not {action} chore {chore_id}: only its creator or a circle admin can "
+                f"{action} it."
+            ) from error
+
+        logger.info(f"{action.capitalize()} chore {chore_id} as circle admin via chore update")
+        if archived:
+            update = ChoreUpdate(isActive=False, notification=False)
+        else:
+            update = ChoreUpdate(isActive=True)
+        return await self.update_chore(chore_id, update)
+
+    async def archive_chore(self, chore_id: int) -> tuple[Chore, bool]:
+        """
+        Archive a chore. Archived chores are inactive and get no notifications.
+
+        Donetick only lets the creator archive a chore. For chores of other users, circle
+        admins fall back to a regular update that deactivates the chore and turns off its
+        notifications.
 
         Returns:
-            Archived Chore object
+            Tuple of the archived Chore and whether the admin fallback was used
         """
         return await self._set_archived(chore_id, True)
 
-    async def unarchive_chore(self, chore_id: int) -> Chore:
+    async def unarchive_chore(self, chore_id: int) -> tuple[Chore, bool]:
         """
-        Restore an archived chore (creator only).
+        Restore an archived chore (creator, or circle admins via a regular update).
+
+        Notifications turned off by the admin fallback stay off.
 
         Returns:
-            Restored Chore object
+            Tuple of the restored Chore and whether the admin fallback was used
         """
         return await self._set_archived(chore_id, False)
 
