@@ -17,7 +17,7 @@ Dazu gehören das Dependency-Update und eine überarbeitete CLAUDE.md.
 | 3 – Bugfixes und API-Kompatibilität | ✅ umgesetzt (2026-09-16), inkl. 3.9 | `chore/phase-1-2-deps-jwt` |
 | 4 – Things-Integration | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
 | 5 – MCP SDK 2.x (`MCPServer`-Refactor, Option A) | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
-| 6 – Dokumentation | offen | – |
+| 6 – Dokumentation | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
 | 7 – API-Token | zurückgestellt | – |
 
 Ergebnis Phase 1+2: `pytest -m "not live_api"` läuft ohne Env-Variablen mit **229 passed**
@@ -81,9 +81,17 @@ dem MCP-2.x-Client, mit einem klassischen `initialize`-Handshake (Protokoll `202
 - Neu im Schema (wurden vorher gelesen, waren aber nicht deklariert): `labels_v2`, `notification_metadata`, `completion_window`, `require_approval`.
 - `get_chore` mit unbekannter ID liefert jetzt einen Tool-Fehler statt normalem Text.
 
-Offen / neu entdeckt:
-- `deadlineOffset` bzw. `deadline_offset` existiert in Donetick `v0.1.79` nicht (kein Feld in `ChoreReq`) und wird ignoriert. Entfernen oder dokumentieren (Phase 6).
-- Der neue Live-Test `TestThings::test_thing_trigger_lifecycle` muss noch gegen eine echte Instanz laufen.
+Ergebnis Phase 6 (Dokumentation), Version **0.5.0**:
+- `README.md` neu: Fork-Hinweis (das PyPI-Paket ist Upstream), Installation per `uvx --from git+…`, Docker (`docker run -i --rm --env-file`) und pip. Außerdem Voraussetzungen (HTTPS, kein MFA, kein SSO-only), Begründung für JWT statt API-Token, Tool-Tabellen für alle 36 Tools und Troubleshooting.
+- `CLAUDE.md` neu (ca. 190 statt ca. 800 Zeilen): Befehle, Architektur mit Tool-Pattern, Auth-Flow, Donetick-API-Quirks, Test-Konventionen (`call_tool`-Fixture, Registrierungsreihenfolge bei pytest-httpx), Checkliste „Adding a Tool“. Ohne Zeilennummern und ohne Versionshistorie.
+- `CHANGELOG.md`: Eintrag 0.5.0 mit Breaking Changes, Added, Fixed, Changed.
+- `tests/integration/README.md`: `TestThings`, Skip-Verhalten, korrigierter Beispielbefehl.
+- Version 0.5.0 in `pyproject.toml` und `__init__.py`. Verifiziert: `docker compose build` und `docker run --env-file` melden `0.5.0` mit 36 Tools.
+
+Offen:
+- Der Live-Test `TestThings::test_thing_trigger_lifecycle` (und die übrigen Live-Tests) müssen noch gegen eine echte Instanz laufen.
+- Die Installation per `uvx --from git+https://github.com/Duell10111/donetick-mcp-server` ist ungetestet (`uv` war lokal nicht installiert) und funktioniert erst, wenn der Branch auf `main` gemergt ist.
+- Optional: Bereinigung der Ruff-Altfunde (`Optional[...]` → `X | None`, N815 für camelCase-Modelfelder per Konfiguration ignorieren).
 
 ---
 

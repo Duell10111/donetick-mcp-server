@@ -6,7 +6,7 @@ This directory contains integration tests that interact with a **real Donetick i
 
 - **DO NOT** run these tests against a production Donetick instance
 - **DO NOT** run these tests with real user data
-- Tests will create, modify, and delete chores in your instance
+- Tests will create, modify, and delete chores and things in your instance
 - All test data is automatically cleaned up, but unexpected failures could leave test chores
 
 ## Prerequisites
@@ -20,6 +20,7 @@ This directory contains integration tests that interact with a **real Donetick i
    DONETICK_TEST_USER_ID=1  # Optional, defaults to 1
    ```
 3. **Test user permissions**: The test user should have permissions to create, update, and delete chores
+4. **Password login without MFA**: the client authenticates with username/password (JWT); accounts with MFA and SSO-only instances are not supported
 
 ## Running Live Tests
 
@@ -35,7 +36,7 @@ pytest tests/integration/test_live_api.py -m live_api -v
 
 ### Run a specific test
 ```bash
-pytest tests/integration/test_live_api.py::test_create_chore -m live_api -v
+pytest "tests/integration/test_live_api.py::TestChoreCreation::test_create_simple_chore" -m live_api -v
 ```
 
 ### Run with detailed output
@@ -45,7 +46,7 @@ pytest tests/integration/ -m live_api -v -s
 
 ## Excluding Live Tests
 
-By default, live tests are **not** run with regular test commands. To explicitly skip them:
+Live tests are **skipped** when `DONETICK_BASE_URL`, `DONETICK_USERNAME` or `DONETICK_PASSWORD` are not set. If your `.env` contains credentials, exclude them explicitly:
 
 ```bash
 # Run only unit tests (skip live API tests)
@@ -72,6 +73,7 @@ The `--strict-markers` flag in `pyproject.toml` ensures you can't accidentally r
 5. **TestChoreDeletion** - Tests for deleting chores
 6. **TestErrorHandling** - Tests for error scenarios and edge cases
 7. **TestFieldNameCasing** - Critical tests for API field name casing
+8. **TestThings** - Things CRUD, thing-triggered chores (trigger kept on update, state change sets due date) and history
 
 ### Fixtures
 
@@ -82,7 +84,7 @@ The `--strict-markers` flag in `pyproject.toml` ensures you can't accidentally r
 
 ## Test Data Cleanup
 
-All test chores are automatically deleted after tests complete via the `test_chore_ids` fixture. To use it in a test:
+All test chores are automatically deleted after tests complete via the `test_chore_ids` fixture. `TestThings` cleans up its chore and thing itself (the chore must be deleted before the thing). To use the fixture in a test:
 
 ```python
 async def test_example(live_client, test_chore_ids, test_user_id):
@@ -100,8 +102,7 @@ async def test_example(live_client, test_chore_ids, test_user_id):
 
 1. **Authentication**
    - JWT token acquisition and management
-   - Automatic token refresh
-   - Credential validation
+   - Invalid credentials raise `DonetickAuthError`
 
 2. **API Operations**
    - Create, read, update, delete operations

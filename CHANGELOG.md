@@ -5,6 +5,55 @@ All notable changes to the Donetick MCP Server will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-16
+
+Compatibility update for Donetick v0.1.79 and MCP SDK 2.x, including the Things API.
+See `UPGRADE_PLAN.md` for the analysis behind these changes.
+
+### Breaking Changes
+- **MCP SDK 2.x required** (`mcp>=2.2,<3`); the server is built on `MCPServer`.
+- **`update_chore` uses snake_case arguments** like all other tools (`next_due_date`, `is_active`, `is_private`, `require_approval`, `frequency_type`, `frequency_metadata`, `is_rolling`, `assign_strategy`, `notification_metadata`, `completion_window`, `project_id`).
+- **`get_all_chores_history`**: `limit`/`offset` replaced by `days` (default 7) and `include_circle_members`. Donetick's `limit` is a number of days and `offset` was ignored.
+- **Removed tool parameters without effect**: `create_chore` `labels`, `nagging`, `predue` (use `label_names`/`labels_v2`, `enable_nagging`, `enable_predue`) and `deadline_offset`/`deadlineOffset` (not supported by Donetick).
+- **Tool errors are returned with `isError=true`** instead of as regular text; `get_chore` with an unknown ID is an error.
+- `ChoreCreate.dueDate` is now `nextDueDate` (`dueDate` is still accepted as input).
+
+### Added
+- **Things**: `list_things`, `create_thing`, `update_thing`, `set_thing_state` (with `increment`, reports triggered chores), `get_thing_history`, `delete_thing`.
+- **Thing-triggered chores**: `thing_id`, `thing_trigger_state`, `thing_trigger_condition` on `create_chore`/`update_chore`, `remove_thing_trigger` on `update_chore`.
+- **Chore actions**: `list_archived_chores`, `archive_chore`, `unarchive_chore`, `undo_chore_action`, `approve_chore`, `reject_chore`, `start_chore_timer`, `pause_chore_timer`, `nudge_chore`.
+- **Projects**: `list_projects`, `project_id` on `create_chore`/`update_chore`.
+- `complete_chore`: `notes` and `completed_at`.
+- `create_chore`: `labels_v2`, `notification_metadata`, `completion_window`, `require_approval` are now declared in the schema.
+- Tool annotations (read-only, destructive, idempotent hints) and server instructions.
+- JWT refresh tokens: proactive refresh before expiry and on `401`, serialized login/refresh.
+- Clear errors for MFA-enabled accounts, SSO-only instances and invalid credentials (`DonetickAuthError`).
+
+### Fixed
+- **Server did not start on fresh installs**: `mcp>=1.20.0` installed MCP SDK 2.x, which removed the `Server` decorators.
+- **`create_chore` lost the due date**: `dueDate` is ignored by Donetick; `nextDueDate` is now sent as RFC3339 (date-only values become 12:00 in the given timezone).
+- **`create_chore` without priority crashed Donetick**; priority is always sent.
+- **`update_chore` failed for assigned chores**: `assignees` received a bare user ID instead of `{"userId": id}`.
+- **`update_chore`/`update_chore_assignee` removed thing triggers**; the trigger is now sent back as `thingTrigger`.
+- **`update_chore_priority` always failed** parsing Donetick's message-only response.
+- **`complete_chore`** sent no JSON body and `completedBy` as query parameter.
+- `ChoreHistory`: integer status (started, completed, skipped, pending_approval, rejected, missed, rescheduled), `notes`, optional `performedAt`.
+- `ChoreDetail`: fields missing in Donetick's details response are optional.
+- `frequency_type="interval_based"` is mapped to `interval`.
+- `update_subtask_completion` uses `PUT /chores/{id}/subtask`; due date only changes use `PUT /chores/{id}/dueDate`.
+- A repeated `401` after re-authentication is no longer retried with backoff.
+- `Dockerfile` installed the package before copying `src/` and could not be built.
+- `docker-compose.yml` passed `DONETICK_API_TOKEN` instead of username and password.
+- Mocked tests no longer need `DONETICK_*` environment variables (configuration is validated at startup instead of import).
+
+### Changed
+- Tools are split by domain into `donetick_mcp/tools/`; the client lifecycle is managed by the server lifespan.
+- No automatic retries on timeouts/5xx for non-idempotent actions (nudge, undo, approve, reject, timer, archive).
+- `pytz` replaced by `zoneinfo` + `tzdata` (correct DST handling for due dates).
+- Dependencies: `httpx>=0.28.1`, `pydantic>=2.10`, `python-dotenv>=1.1`; dev: `pytest>=9`, `pytest-asyncio>=1.0`, `pytest-httpx>=0.36`, `pytest-cov`, `ruff`.
+- Docker image uses Python 3.13 and no longer installs `gcc`.
+- Project URLs point to the fork `Duell10111/donetick-mcp-server`.
+
 ## [0.3.13] - 2025-11-06
 
 ### Fixed
