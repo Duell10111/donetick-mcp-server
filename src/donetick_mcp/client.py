@@ -4,7 +4,9 @@ import asyncio
 import json as json_lib
 import logging
 import random
+import re
 import time
+from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Optional
 
 import httpx
@@ -13,6 +15,9 @@ from .config import config
 from .models import Chore, ChoreCreate, ChoreDetail, ChoreHistory, ChoreUpdate, CircleMember, Label, User, UserProfile
 
 logger = logging.getLogger(__name__)
+
+# Refresh the access token this long before it expires
+TOKEN_REFRESH_MARGIN = timedelta(seconds=60)
 
 # Server-generated metadata fields that should be removed before update requests
 # These fields are added by the API in responses but should not be sent back in updates
@@ -24,6 +29,31 @@ FIELDS_TO_REMOVE = [
     "circleId",
     "status",
 ]
+
+
+class DonetickAuthError(Exception):
+    """Authentication with Donetick failed in a way that retrying cannot fix."""
+
+
+def _parse_token_expiry(value: Any) -> Optional[datetime]:
+    """Parse a token expiry timestamp from a Donetick auth response.
+
+    Go encodes time.Time as RFC3339 with up to 9 fractional digits, while
+    Python only supports 6. The Go zero time (year 1) means "not set".
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    value = re.sub(r"(\.\d{6})\d+", r"\1", value).replace("Z", "+00:00")
+    try:
+        expiry = datetime.fromisoformat(value)
+    except ValueError:
+        logger.debug(f"Could not parse token expiry: {value}")
+        return None
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=UTC)
+    if expiry.year <= 1:
+        return None
+    return expiry
 
 
 class TokenBucket:
@@ -89,10 +119,18 @@ class DonetickClient:
             rate_limit_per_second: Rate limit in requests per second (defaults to config)
             rate_limit_burst: Maximum burst size (defaults to config)
         """
-        self.base_url = (base_url or config.donetick_base_url).rstrip("/")
+        base_url = base_url or config.donetick_base_url
+        if not base_url:
+            raise ValueError("Donetick base URL is not configured (DONETICK_BASE_URL)")
+        self.base_url = base_url.rstrip("/")
         self.username = username or config.donetick_username
         self.password = password or config.donetick_password
         self._jwt_token: Optional[str] = None
+        self._refresh_token: Optional[str] = None
+        self._token_expiry: Optional[datetime] = None
+        # Serializes login/refresh: Donetick revokes the whole session family
+        # when a refresh token is reused, so concurrent refreshes must not happen
+        self._auth_lock = asyncio.Lock()
         self.rate_limiter = TokenBucket(
             rate=rate_limit_per_second or config.rate_limit_per_second,
             capacity=rate_limit_burst or config.rate_limit_burst,
@@ -133,48 +171,151 @@ class DonetickClient:
 
     async def login(self):
         """
-        Authenticate with Donetick API and retrieve JWT token.
+        Authenticate with Donetick API using username and password.
 
-        Makes a POST request to /api/v1/auth/login with username and password,
-        then stores the returned JWT token for subsequent requests.
+        Makes a POST request to /api/v1/auth/login and stores the returned
+        access token (and refresh token, if the instance provides one).
 
         Raises:
-            httpx.HTTPError: On authentication failure
-            ValueError: If login response doesn't contain token
+            DonetickAuthError: On invalid credentials, MFA-enabled accounts,
+                SSO-only instances or malformed login responses
+            httpx.HTTPStatusError: On other HTTP errors (e.g. 429, 5xx)
         """
         url = f"{self.base_url}/api/v1/auth/login"
 
         logger.debug("Authenticating with Donetick API")
 
+        response = await self.client.post(
+            url,
+            json={
+                "username": self.username,
+                "password": self.password,
+            },
+        )
+
+        if response.status_code == 401:
+            logger.error("Authentication failed: invalid username or password")
+            raise DonetickAuthError(
+                "Login failed: invalid username or password. "
+                "Check DONETICK_USERNAME and DONETICK_PASSWORD."
+            )
+        if response.status_code == 403:
+            logger.error("Authentication failed: password login is disabled")
+            raise DonetickAuthError(
+                "Login failed: password authentication is disabled on this Donetick "
+                "instance (SSO-only). Username/password login is required by this server."
+            )
+        response.raise_for_status()
+
+        try:
+            data = response.json()
+        except json_lib.JSONDecodeError as e:
+            logger.error("Invalid JSON response from login endpoint")
+            raise DonetickAuthError(f"Invalid JSON response from login endpoint: {e}") from e
+
+        self._store_tokens(data, source="login")
+        logger.info("Successfully authenticated with Donetick API")
+
+    async def refresh_access_token(self) -> bool:
+        """
+        Get a new access token using the stored refresh token.
+
+        Returns:
+            True if the tokens were refreshed, False if no refresh token is
+            available or Donetick rejected it (caller should log in again)
+        """
+        if not self._refresh_token:
+            return False
+
+        url = f"{self.base_url}/api/v1/auth/refresh"
+        logger.debug("Refreshing Donetick access token")
+
         try:
             response = await self.client.post(
                 url,
-                json={
-                    "username": self.username,
-                    "password": self.password,
-                }
+                json={"refresh_token": self._refresh_token},
             )
-            response.raise_for_status()
+        except httpx.HTTPError as e:
+            logger.warning(f"Token refresh request failed: {e}")
+            return False
 
-            data = response.json()
+        if response.status_code != 200:
+            logger.warning(f"Token refresh rejected ({response.status_code}), logging in again")
+            self._refresh_token = None
+            return False
 
-            if "token" not in data:
-                logger.error("Login response missing 'token' field")
-                raise ValueError("Invalid login response: missing token")
+        try:
+            self._store_tokens(response.json(), source="refresh")
+        except (json_lib.JSONDecodeError, DonetickAuthError) as e:
+            logger.warning(f"Invalid token refresh response: {e}")
+            self._refresh_token = None
+            return False
 
-            self._jwt_token = data["token"]
+        logger.info("Refreshed Donetick access token")
+        return True
 
-            # Update client headers with Bearer token
-            self.client.headers["Authorization"] = f"Bearer {self._jwt_token}"
+    def _store_tokens(self, data: Any, source: str):
+        """Store tokens from a login or refresh response and set the auth header."""
+        if not isinstance(data, dict):
+            raise DonetickAuthError(f"Invalid {source} response: expected a JSON object")
 
-            logger.info("Successfully authenticated with Donetick API")
+        if data.get("mfaRequired"):
+            logger.error("Authentication failed: account has MFA enabled")
+            raise DonetickAuthError(
+                "Login failed: this Donetick account has multi-factor authentication enabled, "
+                "which the MCP server cannot complete. Use an account without MFA."
+            )
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Authentication failed: {e.response.status_code}")
-            raise
-        except json_lib.JSONDecodeError as e:
-            logger.error("Invalid JSON response from login endpoint")
-            raise ValueError(f"Invalid JSON response from login: {e}") from e
+        # Current Donetick returns access_token/refresh_token; "token"/"expire"
+        # are legacy fields kept for older instances
+        token = data.get("access_token") or data.get("token")
+        if not token:
+            logger.error(f"{source.capitalize()} response missing access token")
+            raise DonetickAuthError(f"Invalid {source} response: missing token")
+
+        self._jwt_token = token
+        self._refresh_token = data.get("refresh_token") or None
+        self._token_expiry = _parse_token_expiry(
+            data.get("access_token_expiry") or data.get("expire")
+        )
+
+        # The refresh token is also set as a cookie, which Donetick prefers over the
+        # request body. Drop it so the explicitly stored refresh token is used.
+        self.client.cookies.clear()
+
+        # Update client headers with Bearer token
+        self.client.headers["Authorization"] = f"Bearer {self._jwt_token}"
+
+    def _token_needs_refresh(self) -> bool:
+        """Check whether there is no token or it is about to expire."""
+        if self._jwt_token is None:
+            return True
+        if self._token_expiry is None:
+            return False
+        return datetime.now(UTC) >= self._token_expiry - TOKEN_REFRESH_MARGIN
+
+    async def _ensure_authenticated(self):
+        """Log in or refresh the access token if needed before a request."""
+        if not self._token_needs_refresh():
+            return
+
+        async with self._auth_lock:
+            # Another request may have refreshed the token while we waited
+            if not self._token_needs_refresh():
+                return
+            if self._jwt_token is not None and await self.refresh_access_token():
+                return
+            await self.login()
+
+    async def _reauthenticate(self, rejected_token: Optional[str]):
+        """Get a new access token after the API rejected ``rejected_token``."""
+        async with self._auth_lock:
+            # Another request may already have replaced the rejected token
+            if self._jwt_token is not None and self._jwt_token != rejected_token:
+                return
+            if await self.refresh_access_token():
+                return
+            await self.login()
 
     async def _request(
         self,
@@ -198,9 +339,8 @@ class DonetickClient:
         Raises:
             httpx.HTTPError: On HTTP errors after all retries exhausted
         """
-        # Ensure we have a valid JWT token (lazy initialization)
-        if self._jwt_token is None:
-            await self.login()
+        # Log in lazily and refresh the token shortly before it expires
+        await self._ensure_authenticated()
 
         url = f"{self.base_url}{path}"
         base_delay = 1.0
@@ -213,6 +353,7 @@ class DonetickClient:
 
                 # Make request
                 logger.debug(f"Request {method} {url} (attempt {attempt + 1}/{max_retries})")
+                token_used = self._jwt_token
                 response = await self.client.request(method, url, **kwargs)
 
                 # Handle rate limit responses
@@ -228,7 +369,7 @@ class DonetickClient:
                     if not auth_retry_attempted:
                         logger.warning("Authentication failed (401), refreshing JWT token")
                         auth_retry_attempted = True
-                        await self.login()
+                        await self._reauthenticate(rejected_token=token_used)
                         continue
                     else:
                         logger.error("Authentication failed after token refresh")
@@ -262,8 +403,8 @@ class DonetickClient:
                 await asyncio.sleep(wait_time)
 
             except httpx.HTTPStatusError as e:
-                # Don't retry client errors (4xx) except 429 and 401
-                if 400 <= e.response.status_code < 500 and e.response.status_code not in (429, 401):
+                # Don't retry client errors (4xx); 429 and the first 401 are handled above
+                if 400 <= e.response.status_code < 500:
                     logger.error(f"Client error: {e.response.status_code} - {e.response.text}")
                     raise
 
@@ -1053,7 +1194,7 @@ class DonetickClient:
             ValueError: If frequency_type is 'days_of_the_week' but days_of_week is not provided
         """
         from datetime import datetime
-        import pytz
+        from zoneinfo import ZoneInfo
 
         # Validate required parameters for days_of_the_week
         if frequency_type == "days_of_the_week" and (not days_of_week or len(days_of_week) == 0):
@@ -1117,7 +1258,7 @@ class DonetickClient:
                     minute = int(time_parts[1]) if len(time_parts) > 1 else 0
 
                     # Create datetime in specified timezone
-                    tz = pytz.timezone(timezone)
+                    tz = ZoneInfo(timezone)
                     now = datetime.now(tz)
                     dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
@@ -1213,10 +1354,10 @@ class DonetickClient:
         Returns:
             Due date in RFC3339 format
         """
-        from datetime import datetime, timedelta
-        import pytz
+        from datetime import UTC, datetime, timedelta
+        from zoneinfo import ZoneInfo
 
-        tz = pytz.timezone(timezone)
+        tz = ZoneInfo(timezone)
         now = datetime.now(tz)
 
         if frequency_type == "once":
@@ -1272,4 +1413,4 @@ class DonetickClient:
             due = due.replace(hour=12, minute=0, second=0, microsecond=0)
 
         # Convert to UTC and format as RFC3339
-        return due.astimezone(pytz.UTC).isoformat().replace('+00:00', 'Z')
+        return due.astimezone(UTC).isoformat().replace('+00:00', 'Z')

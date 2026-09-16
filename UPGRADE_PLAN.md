@@ -8,6 +8,27 @@ Ziel: Den Fork kompatibel mit der aktuellen Donetick-Version machen. Schwerpunkt
 **Authentifizierung** (geprüft: API-Token vs. JWT, Entscheidung: vorerst JWT) und **Things-API**.
 Dazu gehören das Dependency-Update und eine überarbeitete CLAUDE.md.
 
+## Fortschritt
+
+| Phase | Status | Branch |
+|---|---|---|
+| 1 – Stabilisierung und Dependencies | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
+| 2 – JWT-Authentifizierung härten | ✅ umgesetzt (2026-09-16) | `chore/phase-1-2-deps-jwt` |
+| 3–6 | offen | – |
+| 7 – API-Token | zurückgestellt | – |
+
+Ergebnis Phase 1+2: `pytest -m "not live_api"` läuft ohne Env-Variablen mit **229 passed**
+(vorher 196 passed / 1 failed, nur mit passender Test-URL). Das Docker-Image (Python 3.13, `mcp` 1.30.0)
+baut und beantwortet `initialize` und `tools/list` (20 Tools) über stdio.
+
+Abweichungen und Zusatzfunde bei der Umsetzung:
+- **Dockerfile war nicht baubar:** `pip install -e .` lief vor `COPY src/`. Jetzt werden `pyproject.toml`, `README.md` und `src/` zuerst kopiert, dann folgt eine normale Installation. Der `apt`/`gcc`-Schritt ist entfernt, weil alle Dependencies Wheels haben.
+- `pytz` ist durch `zoneinfo` + `tzdata` ersetzt. Nebeneffekt: Fälligkeitszeiten über Sommer-/Winterzeitwechsel werden jetzt korrekt berechnet (pytz hat den Offset von „jetzt“ beibehalten).
+- Ein zweiter `401` nach der Re-Authentifizierung wurde bisher wie ein 5xx mit Backoff wiederholt. Jetzt kommt sofort ein Fehler (Tests angepasst).
+- Refresh-Token: Donetick liest ihn bevorzugt aus dem Cookie und sperrt bei Wiederverwendung die ganze Session-Familie. Der Client verwirft deshalb die Cookies, sendet den Token im Body und serialisiert Login/Refresh über einen Lock.
+- Neue Testdatei `tests/test_auth.py` (23 Tests: Login-Varianten, MFA, SSO-only, Refresh, paralleler Login, Config).
+- Nicht umgesetzt: `ruff`-Bereinigung des Bestandscodes (252 Altfunde, überwiegend N815 für camelCase-Felder, gewollt). Das gehört zu Phase 5/6.
+
 ---
 
 ## 0. Zusammenfassung (TL;DR)

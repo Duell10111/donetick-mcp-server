@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timedelta
-import pytz
+from zoneinfo import ZoneInfo
 
 from donetick_mcp.client import DonetickClient
 
@@ -11,7 +11,7 @@ from donetick_mcp.client import DonetickClient
 def client():
     """Create a test client instance for transformation testing."""
     return DonetickClient(
-        base_url="https://test.donetick.com",
+        base_url="https://donetick.test",
         username="test_user",
         password="test_password",
         rate_limit_per_second=100.0,
@@ -232,7 +232,7 @@ class TestDueDateCalculation:
         )
 
         # Should return tomorrow at noon
-        tz = pytz.timezone("America/New_York")
+        tz = ZoneInfo("America/New_York")
         now = datetime.now(tz)
         tomorrow = now + timedelta(days=1)
 
@@ -246,7 +246,7 @@ class TestDueDateCalculation:
 
     def test_calculate_due_date_daily_with_time(self, client):
         """Test due date calculation for daily frequency with specific time."""
-        tz = pytz.timezone("America/New_York")
+        tz = ZoneInfo("America/New_York")
         now = datetime.now(tz)
         test_time = now.replace(hour=9, minute=30)
 
@@ -268,7 +268,7 @@ class TestDueDateCalculation:
 
     def test_calculate_due_date_days_of_week_next_occurrence(self, client):
         """Test due date calculation for specific day of week."""
-        tz = pytz.timezone("America/New_York")
+        tz = ZoneInfo("America/New_York")
         now = datetime.now(tz)
 
         # Set metadata for Wednesday at 2 PM
@@ -304,7 +304,7 @@ class TestDueDateCalculation:
         )
 
         result_dt = datetime.fromisoformat(result.replace('Z', '+00:00'))
-        tz = pytz.timezone("America/New_York")
+        tz = ZoneInfo("America/New_York")
         result_tz = result_dt.astimezone(tz)
 
         assert result_tz.hour == 16
@@ -319,7 +319,7 @@ class TestDueDateCalculation:
         )
 
         result_dt = datetime.fromisoformat(result.replace('Z', '+00:00'))
-        tz = pytz.timezone("America/New_York")
+        tz = ZoneInfo("America/New_York")
         result_tz = result_dt.astimezone(tz)
 
         assert result_tz.hour == 12

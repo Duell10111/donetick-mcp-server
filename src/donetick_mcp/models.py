@@ -366,8 +366,8 @@ class ChoreCreate(BaseModel):
         # Validate timezone is IANA format
         if 'timezone' in v and v['timezone']:
             try:
-                import pytz
-                pytz.timezone(v['timezone'])
+                from zoneinfo import ZoneInfo
+                ZoneInfo(v['timezone'])
             except Exception:
                 raise ValueError(
                     f'Invalid timezone "{v["timezone"]}". '

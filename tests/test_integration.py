@@ -18,7 +18,7 @@ from donetick_mcp.models import ChoreCreate
 def client():
     """Create a test client instance with high rate limit for fast tests."""
     return DonetickClient(
-        base_url="https://test.donetick.com",
+        base_url="https://donetick.test",
         username="test_user",
         password="test_password",
         rate_limit_per_second=100.0,
@@ -30,7 +30,7 @@ def client():
 def mock_login(httpx_mock: HTTPXMock):
     """Mock the login endpoint for authentication."""
     httpx_mock.add_response(
-        url="https://test.donetick.com/api/v1/auth/login",
+        url="https://donetick.test/api/v1/auth/login",
         json={"token": "test_jwt_token"},
         method="POST",
     )
@@ -90,12 +90,12 @@ class TestFullChoreLifecycle:
         """
         # STEP 1: Create chore
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json={"res": 1},
             method="POST",
         )
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={
                 "id": 1,
                 "name": "Vacuum Living Room",
@@ -125,7 +125,7 @@ class TestFullChoreLifecycle:
 
             # STEP 2: Get chore to verify
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/1",
+                url="https://donetick.test/api/v1/chores/1",
                 json={
                     "id": 1,
                     "name": "Vacuum Living Room",
@@ -149,9 +149,34 @@ class TestFullChoreLifecycle:
             assert fetched_chore.id == 1
             assert fetched_chore.name == "Vacuum Living Room"
 
-            # STEP 3: Update chore (Premium feature)
+            # STEP 3: Update chore
+            # update_chore fetches the full chore, PUTs it to /api/v1/chores/ (ID in body,
+            # message-only response) and fetches the updated chore afterwards
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/1",
+                url="https://donetick.test/api/v1/chores/1",
+                json={
+                    "id": 1,
+                    "name": "Vacuum Living Room",
+                    "description": "Clean the carpets",
+                    "frequencyType": "weekly",
+                    "frequency": 1,
+                    "isActive": True,
+                    "nextDueDate": "2025-11-10T00:00:00Z",
+                    "priority": 2,
+                    "circleId": 1,
+                    "createdAt": "2025-11-03T00:00:00Z",
+                    "updatedAt": "2025-11-03T00:00:00Z",
+                    "createdBy": 1,
+                },
+                method="GET",
+            )
+            httpx_mock.add_response(
+                url="https://donetick.test/api/v1/chores/",
+                json={"message": "Chore added successfully"},
+                method="PUT",
+            )
+            httpx_mock.add_response(
+                url="https://donetick.test/api/v1/chores/1",
                 json={
                     "id": 1,
                     "name": "Vacuum Living Room",
@@ -166,7 +191,7 @@ class TestFullChoreLifecycle:
                     "updatedAt": "2025-11-03T00:00:00Z",
                     "createdBy": 1,
                 },
-                method="PUT",
+                method="GET",
             )
 
             from donetick_mcp.models import ChoreUpdate
@@ -180,9 +205,9 @@ class TestFullChoreLifecycle:
             assert updated_chore.description == "Clean carpets thoroughly with vacuum attachment"
             assert updated_chore.priority == 3
 
-            # STEP 4: Complete chore (Premium feature)
+            # STEP 4: Complete chore
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/1/do",
+                url="https://donetick.test/api/v1/chores/1/do",
                 json={
                     "id": 1,
                     "name": "Vacuum Living Room",
@@ -207,7 +232,7 @@ class TestFullChoreLifecycle:
 
             # STEP 5: Delete chore
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/1",
+                url="https://donetick.test/api/v1/chores/1",
                 json={},
                 method="DELETE",
             )
@@ -217,7 +242,7 @@ class TestFullChoreLifecycle:
 
             # STEP 6: Verify chore is gone
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/1",
+                url="https://donetick.test/api/v1/chores/1",
                 status_code=404,
             )
 
@@ -247,7 +272,7 @@ class TestLabelWorkflow:
         async with client:
             # STEP 1: Create label
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/labels",
+                url="https://donetick.test/api/v1/labels",
                 json={"res": {"id": 10, "name": "urgent", "color": "#FF0000"}},
                 method="POST",
             )
@@ -260,12 +285,12 @@ class TestLabelWorkflow:
 
             # STEP 2: Create chore with label
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 json={"res": 5},
                 method="POST",
             )
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/5",
+                url="https://donetick.test/api/v1/chores/5",
                 json={
                     "id": 5,
                     "name": "Fix Leaky Faucet",
@@ -300,7 +325,7 @@ class TestLabelWorkflow:
 
             # STEP 3: Verify label in chore
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/5",
+                url="https://donetick.test/api/v1/chores/5",
                 json={
                     "id": 5,
                     "name": "Fix Leaky Faucet",
@@ -328,7 +353,7 @@ class TestLabelWorkflow:
 
             # STEP 4: Delete label
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/labels/10",
+                url="https://donetick.test/api/v1/labels/10",
                 json={},
                 method="DELETE",
             )
@@ -339,7 +364,7 @@ class TestLabelWorkflow:
             # STEP 5: Verify chore handles orphaned label gracefully
             # In real API, the label would be removed from the chore
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/5",
+                url="https://donetick.test/api/v1/chores/5",
                 json={
                     "id": 5,
                     "name": "Fix Leaky Faucet",
@@ -382,7 +407,7 @@ class TestUserLookupAndAssignment:
         async with client:
             # STEP 1: Lookup users from circle
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/circles/members/",
+                url="https://donetick.test/api/v1/circles/members/",
                 json={
                     "res": [
                         {
@@ -429,12 +454,12 @@ class TestUserLookupAndAssignment:
 
             # STEP 2: Create chore with multiple assignees
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 json={"res": 20},
                 method="POST",
             )
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/20",
+                url="https://donetick.test/api/v1/chores/20",
                 json={
                     "id": 20,
                     "name": "Weekly Grocery Shopping",
@@ -477,7 +502,7 @@ class TestUserLookupAndAssignment:
 
             # STEP 3: Verify assignment after completion (should rotate to next user)
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/20/do",
+                url="https://donetick.test/api/v1/chores/20/do",
                 json={
                     "id": 20,
                     "name": "Weekly Grocery Shopping",
@@ -508,12 +533,12 @@ class TestUserLookupAndAssignment:
 
             # STEP 4: Test least_completed strategy
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 json={"res": 21},
                 method="POST",
             )
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/21",
+                url="https://donetick.test/api/v1/chores/21",
                 json={
                     "id": 21,
                     "name": "Take Out Trash",

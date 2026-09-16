@@ -24,7 +24,7 @@ from donetick_mcp.client import DonetickClient, TokenBucket
 def client():
     """Create a test client instance."""
     return DonetickClient(
-        base_url="https://test.donetick.com",
+        base_url="https://donetick.test",
         username="test_user",
         password="test_password",
         rate_limit_per_second=10.0,  # Lower limit for testing rate limiter
@@ -36,7 +36,7 @@ def client():
 def fast_client():
     """Create a test client with high rate limit for performance tests."""
     return DonetickClient(
-        base_url="https://test.donetick.com",
+        base_url="https://donetick.test",
         username="test_user",
         password="test_password",
         rate_limit_per_second=100.0,
@@ -48,7 +48,7 @@ def fast_client():
 def mock_login(httpx_mock: HTTPXMock):
     """Mock the login endpoint for authentication."""
     httpx_mock.add_response(
-        url="https://test.donetick.com/api/v1/auth/login",
+        url="https://donetick.test/api/v1/auth/login",
         json={"token": "test_jwt_token"},
         method="POST",
     )
@@ -107,7 +107,7 @@ class TestRateLimiting:
         # Mock 20 responses
         for _ in range(20):
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 json=[sample_chore_data],
             )
 
@@ -179,13 +179,13 @@ class TestConcurrentRequests:
         # Mock responses for different endpoints
         for _ in range(5):
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 json=[sample_chore_data],
             )
 
         for i in range(1, 6):
             httpx_mock.add_response(
-                url=f"https://test.donetick.com/api/v1/chores/{i}",
+                url=f"https://donetick.test/api/v1/chores/{i}",
                 json={**sample_chore_data, "id": i},
             )
 
@@ -238,7 +238,7 @@ class TestConcurrentRequests:
         # Mock 60 responses
         for _ in range(60):
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 json=[sample_chore_data],
             )
 
@@ -275,27 +275,27 @@ class TestTokenRefresh:
         """
         # Initial login
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/auth/login",
+            url="https://donetick.test/api/v1/auth/login",
             json={"token": "initial_token"},
             method="POST",
         )
 
         # First API request returns 401 (expired token)
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=401,
         )
 
         # Token refresh (automatic)
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/auth/login",
+            url="https://donetick.test/api/v1/auth/login",
             json={"token": "refreshed_token"},
             method="POST",
         )
 
         # Retry succeeds
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data],
         )
 
@@ -333,19 +333,19 @@ class TestRetryBackoff:
         """
         # First two attempts return 500
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=500,
             json={"error": "Internal server error"},
         )
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=500,
             json={"error": "Internal server error"},
         )
 
         # Third attempt succeeds
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data],
         )
 
@@ -386,7 +386,7 @@ class TestRetryBackoff:
 
         # Third attempt succeeds
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data],
         )
 
@@ -457,7 +457,7 @@ class TestLargePayloads:
             })
 
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=large_response,
         )
 
@@ -500,7 +500,7 @@ class TestLargePayloads:
             })
 
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={"res": large_labels},
         )
 
@@ -515,7 +515,7 @@ class TestLargePayloads:
 
             # Test lookup with large set
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/labels",
+                url="https://donetick.test/api/v1/labels",
                 json={"res": large_labels},
             )
 

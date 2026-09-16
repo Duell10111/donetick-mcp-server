@@ -1,25 +1,17 @@
 # Multi-stage Dockerfile for Donetick MCP Server
 
-FROM python:3.11-slim as base
+FROM python:3.13-slim AS base
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy dependency files
-COPY pyproject.toml ./
-
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -e .
-
-# Copy application code
+# Copy project metadata and application code (setuptools needs src/ and README.md to build)
+COPY pyproject.toml README.md ./
 COPY src/ ./src/
+
+# Install the package and its dependencies (all dependencies ship prebuilt wheels)
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir .
 
 # Create non-root user for security
 RUN useradd -m -u 1000 mcpuser && \
