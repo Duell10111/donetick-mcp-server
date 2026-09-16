@@ -11,7 +11,8 @@ services:
     # Environment variables
     environment:
       - DONETICK_BASE_URL=${DONETICK_BASE_URL:-https://donetick.example.com}
-      - DONETICK_API_TOKEN=${DONETICK_API_TOKEN}
+      - DONETICK_USERNAME=${DONETICK_USERNAME}
+      - DONETICK_PASSWORD=${DONETICK_PASSWORD}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - RATE_LIMIT_PER_SECOND=${RATE_LIMIT_PER_SECOND:-10.0}
       - RATE_LIMIT_BURST=${RATE_LIMIT_BURST:-10}

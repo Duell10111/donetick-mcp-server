@@ -2,7 +2,6 @@
 
 import logging
 import os
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -11,28 +10,35 @@ load_dotenv()
 
 
 class Config:
-    """Configuration for Donetick MCP server."""
+    """Configuration for Donetick MCP server.
+
+    Values are read from the environment on construction. Validation is not
+    performed automatically so that importing the package (e.g. in tests) does
+    not require credentials; call ``validate()`` before starting the server.
+    """
 
     def __init__(self):
         """Initialize configuration from environment variables."""
         self.donetick_base_url = os.getenv("DONETICK_BASE_URL")
+        if self.donetick_base_url:
+            self.donetick_base_url = self.donetick_base_url.rstrip("/")
         self.donetick_username = os.getenv("DONETICK_USERNAME")
         self.donetick_password = os.getenv("DONETICK_PASSWORD")
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
         self.rate_limit_per_second = float(os.getenv("RATE_LIMIT_PER_SECOND", "10.0"))
         self.rate_limit_burst = int(os.getenv("RATE_LIMIT_BURST", "10"))
 
-        # Check for deprecated API token
+        # Donetick supports long-lived API tokens ("secretkey" header), but not for
+        # all endpoints (labels and users are JWT-only). Not supported here yet.
         self.donetick_api_token = os.getenv("DONETICK_API_TOKEN")
 
-        # Validate required configuration (skip if in test mode)
-        if os.getenv("PYTEST_CURRENT_TEST") is None:
-            self._validate()
+    def validate(self):
+        """Validate that required configuration is present and secure.
 
-    def _validate(self):
-        """Validate that required configuration is present and secure."""
+        Raises:
+            ValueError: If required settings are missing or insecure
+        """
         errors = []
-        warnings = []
 
         # Check base URL
         if not self.donetick_base_url:
@@ -40,23 +46,13 @@ class Config:
                 "DONETICK_BASE_URL environment variable is required. "
                 "Please set it to your Donetick instance URL."
             )
-        else:
+        elif not self.donetick_base_url.startswith("https://"):
             # Enforce HTTPS for security
-            if not self.donetick_base_url.startswith("https://"):
-                errors.append(
-                    f"DONETICK_BASE_URL must use HTTPS for security. "
-                    f"Got: {self.donetick_base_url[:50]}"
-                )
-
-        # Check for deprecated API token
-        if self.donetick_api_token:
-            warnings.append(
-                "DONETICK_API_TOKEN is deprecated in v2.0.0. "
-                "Please migrate to JWT authentication using DONETICK_USERNAME and DONETICK_PASSWORD. "
-                "See migration guide: https://github.com/yourusername/donetick-mcp-server#migration"
+            errors.append(
+                f"DONETICK_BASE_URL must use HTTPS for security. "
+                f"Got: {self.donetick_base_url[:50]}"
             )
 
-        # Check username and password for JWT auth
         if not self.donetick_username:
             errors.append(
                 "DONETICK_USERNAME environment variable is required. "
@@ -69,21 +65,18 @@ class Config:
                 "Please set it to your Donetick account password."
             )
 
-        # Log warnings
-        if warnings:
-            logger = logging.getLogger(__name__)
-            for warning in warnings:
-                logger.warning(warning)
+        if self.donetick_api_token:
+            logging.getLogger(__name__).warning(
+                "DONETICK_API_TOKEN is set but API token authentication is not supported yet "
+                "(Donetick does not accept API tokens for labels and user endpoints). "
+                "The server authenticates with DONETICK_USERNAME and DONETICK_PASSWORD."
+            )
 
-        # Raise all errors together
         if errors:
             raise ValueError(
                 "Configuration validation failed:\n" +
                 "\n".join(f"  - {error}" for error in errors)
             )
-
-        # Normalize base URL (remove trailing slash)
-        self.donetick_base_url = self.donetick_base_url.rstrip("/")
 
     def configure_logging(self):
         """Configure logging based on log level."""

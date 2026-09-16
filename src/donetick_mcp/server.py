@@ -11,7 +11,7 @@ from mcp.server import Server
 from mcp.types import TextContent, Tool
 
 from . import __version__
-from .client import DonetickClient
+from .client import DonetickAuthError, DonetickClient
 from .config import config
 from .models import ChoreCreate, ChoreUpdate
 
@@ -1515,6 +1515,19 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
 
         return [TextContent(type="text", text=f"Error: {error_msg}")]
 
+    except DonetickAuthError as e:
+        logger.error(f"Authentication error executing tool {name}: {e}")
+        return [TextContent(
+            type="text",
+            text=(
+                f"Error: Authentication failed. {e}\n\n"
+                "💡 Hint: Verify the configuration in environment variables or .env file:\n"
+                "   - DONETICK_BASE_URL\n"
+                "   - DONETICK_USERNAME\n"
+                "   - DONETICK_PASSWORD"
+            )
+        )]
+
     except httpx.TimeoutException as e:
         logger.error(f"Timeout executing tool {name}: {e}", exc_info=True)
         return [TextContent(
@@ -1609,6 +1622,13 @@ def main():
     """Main entry point for the MCP server."""
     import sys
     import traceback
+
+    try:
+        config.validate()
+    except ValueError as e:
+        logger.error(str(e))
+        print(f"Failed to start server: {e}", file=sys.stderr)
+        sys.exit(1)
 
     try:
         # Run the async main function

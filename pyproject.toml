@@ -10,7 +10,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "Jason", email = "jason1365@users.noreply.github.com"}
+    {name = "Jason", email = "jason1365@users.noreply.github.com"},
+    {name = "Konstantin Späth"},
 ]
 keywords = ["mcp", "donetick", "chores", "api", "claude"]
 classifiers = [
@@ -21,28 +22,34 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "mcp>=1.20.0",
-    "httpx>=0.27.0",
-    "pydantic>=2.0.0",
-    "python-dotenv>=1.0.0",
-    "pytz>=2024.1",
+    # MCP SDK 2.x removed the low-level Server decorators used in server.py
+    "mcp>=1.26.0,<2",
+    "httpx>=0.28.1,<1",
+    "pydantic>=2.10,<3",
+    "python-dotenv>=1.1.0",
+    # IANA timezone data for zoneinfo (not bundled on Windows / slim images)
+    "tzdata>=2025.1",
 ]
 
 [project.urls]
-Homepage = "https://github.com/jason1365/donetick-mcp-server"
-Documentation = "https://github.com/jason1365/donetick-mcp-server#readme"
-Repository = "https://github.com/jason1365/donetick-mcp-server"
-Issues = "https://github.com/jason1365/donetick-mcp-server/issues"
-Changelog = "https://github.com/jason1365/donetick-mcp-server/releases"
+Homepage = "https://github.com/Duell10111/donetick-mcp-server"
+Documentation = "https://github.com/Duell10111/donetick-mcp-server#readme"
+Repository = "https://github.com/Duell10111/donetick-mcp-server"
+Issues = "https://github.com/Duell10111/donetick-mcp-server/issues"
+Changelog = "https://github.com/Duell10111/donetick-mcp-server/blob/main/CHANGELOG.md"
+Upstream = "https://github.com/jason1365/donetick-mcp-server"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-mock>=3.12.0",
-    "pytest-httpx>=0.30.0",
+    "pytest>=9.0",
+    "pytest-asyncio>=1.0",
+    "pytest-mock>=3.15",
+    "pytest-httpx>=0.36",
+    "pytest-cov>=7.0",
+    "ruff>=0.16",
 ]
 
 [project.scripts]

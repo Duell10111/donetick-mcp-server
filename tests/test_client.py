@@ -11,7 +11,7 @@ from donetick_mcp.models import Chore, ChoreCreate, User, UserProfile
 def client():
     """Create a test client instance."""
     return DonetickClient(
-        base_url="https://test.donetick.com",
+        base_url="https://donetick.test",
         username="test_user",
         password="test_password",
         rate_limit_per_second=100.0,  # High limit for fast tests
@@ -23,7 +23,7 @@ def client():
 def mock_login(httpx_mock: HTTPXMock):
     """Mock the login endpoint for authentication."""
     httpx_mock.add_response(
-        url="https://test.donetick.com/api/v1/auth/login",
+        url="https://donetick.test/api/v1/auth/login",
         json={"token": "test_jwt_token"},
         method="POST",
     )
@@ -96,7 +96,7 @@ class TestDonetickClient:
     async def test_list_chores(self, client, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
         """Test listing all chores."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data],
         )
 
@@ -115,7 +115,7 @@ class TestDonetickClient:
         inactive_chore["isActive"] = False
 
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data, inactive_chore],
         )
 
@@ -135,7 +135,7 @@ class TestDonetickClient:
         other_user_chore["assignedTo"] = 2
 
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data, other_user_chore],
         )
 
@@ -149,7 +149,7 @@ class TestDonetickClient:
     async def test_get_chore(self, client, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
         """Test getting a specific chore by ID."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json=sample_chore_data,
         )
 
@@ -164,7 +164,7 @@ class TestDonetickClient:
     async def test_get_chore_not_found(self, client, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
         """Test getting a non-existent chore."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/999",
+            url="https://donetick.test/api/v1/chores/999",
             status_code=404,
         )
 
@@ -178,13 +178,13 @@ class TestDonetickClient:
         """Test creating a new chore."""
         # Mock POST response (API returns {'res': chore_id})
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json={"res": 1},
             method="POST",
         )
         # Mock GET response for fetching created chore
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json=sample_chore_data,
         )
 
@@ -203,7 +203,7 @@ class TestDonetickClient:
     async def test_delete_chore(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test deleting a chore."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={},
             method="DELETE",
         )
@@ -217,7 +217,7 @@ class TestDonetickClient:
     async def test_complete_chore(self, client, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
         """Test completing a chore."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1/do",
+            url="https://donetick.test/api/v1/chores/1/do",
             json=sample_chore_data,
             method="POST",
         )
@@ -233,20 +233,20 @@ class TestDonetickClient:
         """Test updating basic chore fields (name, description, due date)."""
         # Mock GET to fetch current chore
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": sample_chore_data},
             method="GET",
         )
         # Mock PUT to update chore
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json={"message": "Chore added successfully"},
             method="PUT",
         )
         # Mock GET to fetch updated chore
         updated_chore = {**sample_chore_data, "name": "Updated Name", "description": "Updated description"}
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": updated_chore},
             method="GET",
         )
@@ -270,7 +270,7 @@ class TestDonetickClient:
             "assignees": [],  # But not in assignees array!
         }
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": inconsistent_chore},
             method="GET",
         )
@@ -286,12 +286,12 @@ class TestDonetickClient:
             assert 5 in data["assignees"], "assignedTo must be in assignees array"
             return httpx_lib.Response(200, json={"message": "Chore added successfully"})
 
-        httpx_mock.add_callback(check_assignee_constraint, url="https://test.donetick.com/api/v1/chores/", method="PUT")
+        httpx_mock.add_callback(check_assignee_constraint, url="https://donetick.test/api/v1/chores/", method="PUT")
 
         # Mock GET to return updated chore
         fixed_chore = {**inconsistent_chore, "assignees": [{"userId": 5}]}
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": fixed_chore},
             method="GET",
         )
@@ -310,7 +310,7 @@ class TestDonetickClient:
         """Test updating chore priority."""
         updated_chore = {**sample_chore_data, "priority": 4}
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1/priority",
+            url="https://donetick.test/api/v1/chores/1/priority",
             json=updated_chore,
             method="PUT",
         )
@@ -336,20 +336,20 @@ class TestDonetickClient:
         """Test reassigning a chore to different user."""
         # Mock GET to fetch current chore
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": sample_chore_data},
             method="GET",
         )
         # Mock PUT to update chore
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json={"message": "Chore added successfully"},
             method="PUT",
         )
         # Mock GET to fetch updated chore
         updated_chore = {**sample_chore_data, "assignedTo": 2, "assignees": [{"userId": 2}]}
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": updated_chore},
             method="GET",
         )
@@ -365,7 +365,7 @@ class TestDonetickClient:
         """Test skipping a chore."""
         updated_chore = {**sample_chore_data, "nextDueDate": "2025-11-17"}
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1/skip",
+            url="https://donetick.test/api/v1/chores/1/skip",
             json=updated_chore,
             method="POST",
         )
@@ -389,18 +389,18 @@ class TestDonetickClient:
         }
         # First GET: update_subtask_completion fetches current chore
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": chore_with_subtasks},
         )
         # Second GET: update_chore fetches current chore
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": chore_with_subtasks},
         )
 
         # Mock PUT response (returns message)
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json={"message": "Chore added successfully"},
             method="PUT",
         )
@@ -414,7 +414,7 @@ class TestDonetickClient:
             ]
         }
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": updated_chore},
         )
 
@@ -431,13 +431,13 @@ class TestDonetickClient:
         """Test retry logic on 429 rate limit."""
         # First request returns 429
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=429,
             headers={"Retry-After": "0.1"},
         )
         # Second request succeeds
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data],
         )
 
@@ -450,7 +450,7 @@ class TestDonetickClient:
     async def test_http_error_4xx_no_retry(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test that 4xx errors don't retry (except 429)."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=404,
             json={"error": "Not found"},
         )
@@ -476,7 +476,7 @@ class TestDonetickClient:
         # Mock multiple responses
         for _ in range(5):
             httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 json=[sample_chore_data],
             )
 
@@ -493,7 +493,7 @@ class TestDonetickClient:
     async def test_jwt_login(self, client, httpx_mock: HTTPXMock):
         """Test JWT authentication login."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/auth/login",
+            url="https://donetick.test/api/v1/auth/login",
             json={"token": "test_jwt_token_123"},
             method="POST",
         )
@@ -510,24 +510,24 @@ class TestDonetickClient:
         """Test that 401 errors trigger token refresh and retry."""
         # First login
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/auth/login",
+            url="https://donetick.test/api/v1/auth/login",
             json={"token": "initial_token"},
             method="POST",
         )
         # First request returns 401
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=401,
         )
         # Token refresh
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/auth/login",
+            url="https://donetick.test/api/v1/auth/login",
             json={"token": "refreshed_token"},
             method="POST",
         )
         # Retry succeeds
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data],
         )
 
@@ -542,29 +542,28 @@ class TestDonetickClient:
         """Test that repeated 401 errors raise authentication error."""
         # First login
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/auth/login",
+            url="https://donetick.test/api/v1/auth/login",
             json={"token": "initial_token"},
             method="POST",
         )
         # First request returns 401
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=401,
             method="GET",
         )
         # Token refresh
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/auth/login",
+            url="https://donetick.test/api/v1/auth/login",
             json={"token": "refreshed_token"},
             method="POST",
         )
-        # Retry also fails with 401 - need mocks for remaining retry attempts (max 3 total)
-        for _ in range(2):
-            httpx_mock.add_response(
-                url="https://test.donetick.com/api/v1/chores/",
-                status_code=401,
-                method="GET",
-            )
+        # Retry after re-authentication also fails with 401 - no further retries
+        httpx_mock.add_response(
+            url="https://donetick.test/api/v1/chores/",
+            status_code=401,
+            method="GET",
+        )
 
         async with client:
             with pytest.raises(Exception) as exc_info:
@@ -580,7 +579,7 @@ class TestDonetickClient:
     async def test_list_users_success(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test listing all circle users."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/users/",
+            url="https://donetick.test/api/v1/users/",
             json=[
                 {"id": 1, "username": "alice", "displayName": "Alice Smith", "email": "alice@example.com"},
                 {"id": 2, "username": "bob", "displayName": "Bob Jones", "email": "bob@example.com"},
@@ -599,7 +598,7 @@ class TestDonetickClient:
     async def test_list_users_empty(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test listing users when circle is empty."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/users/",
+            url="https://donetick.test/api/v1/users/",
             json=[],
         )
 
@@ -612,7 +611,7 @@ class TestDonetickClient:
     async def test_list_users_wrapped_response(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test handling wrapped response format."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/users/",
+            url="https://donetick.test/api/v1/users/",
             json={
                 "users": [
                     {"id": 1, "username": "charlie", "displayName": "Charlie Brown"},
@@ -630,7 +629,7 @@ class TestDonetickClient:
     async def test_list_users_res_wrapped(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test handling 'res' wrapped response format."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/users/",
+            url="https://donetick.test/api/v1/users/",
             json={
                 "res": [
                     {"id": 3, "username": "diana", "displayName": "Diana Prince"},
@@ -648,7 +647,7 @@ class TestDonetickClient:
     async def test_get_user_profile_success(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test getting current user profile with all fields."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/users/profile",
+            url="https://donetick.test/api/v1/users/profile",
             json={
                 "id": 1,
                 "username": "alice",
@@ -681,7 +680,7 @@ class TestDonetickClient:
     async def test_get_user_profile_wrapped(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test profile with wrapped response."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/users/profile",
+            url="https://donetick.test/api/v1/users/profile",
             json={
                 "res": {
                     "id": 2,
@@ -703,24 +702,24 @@ class TestDonetickClient:
         """Test automatic JWT refresh on 401."""
         # First login
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/auth/login",
+            url="https://donetick.test/api/v1/auth/login",
             json={"token": "initial_token"},
             method="POST",
         )
         # First request returns 401
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/users/profile",
+            url="https://donetick.test/api/v1/users/profile",
             status_code=401,
         )
         # Token refresh
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/auth/login",
+            url="https://donetick.test/api/v1/auth/login",
             json={"token": "refreshed_token"},
             method="POST",
         )
         # Retry succeeds
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/users/profile",
+            url="https://donetick.test/api/v1/users/profile",
             json={
                 "id": 1,
                 "username": "alice",
@@ -741,7 +740,7 @@ class TestDonetickClient:
     async def test_get_labels_success(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test fetching all labels."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={
                 "res": [
                     {"id": 1, "name": "cleaning", "color": "#FF5733"},
@@ -762,7 +761,7 @@ class TestDonetickClient:
     async def test_get_labels_empty(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test fetching labels when none exist."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={"res": []},
         )
 
@@ -775,7 +774,7 @@ class TestDonetickClient:
     async def test_create_label_success(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test creating new label."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={"res": {"id": 1, "name": "urgent", "color": "#FF0000"}},
             method="POST",
         )
@@ -791,7 +790,7 @@ class TestDonetickClient:
     async def test_create_label_no_color(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test creating label without color."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={"res": {"id": 2, "name": "daily", "color": None}},
             method="POST",
         )
@@ -807,7 +806,7 @@ class TestDonetickClient:
     async def test_create_label_duplicate_name(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test creating label with duplicate name."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             status_code=409,
             json={"error": "Label already exists"},
             method="POST",
@@ -821,7 +820,7 @@ class TestDonetickClient:
     async def test_update_label_success(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test updating existing label."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={"res": {"id": 1, "name": "super urgent", "color": "#FF0000"}},
             method="PUT",
         )
@@ -836,7 +835,7 @@ class TestDonetickClient:
     async def test_update_label_not_found(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test updating non-existent label."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             status_code=404,
             json={"error": "Label not found"},
             method="PUT",
@@ -850,7 +849,7 @@ class TestDonetickClient:
     async def test_delete_label_success(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test deleting label."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels/1",
+            url="https://donetick.test/api/v1/labels/1",
             json={},
             method="DELETE",
         )
@@ -865,7 +864,7 @@ class TestDonetickClient:
         """Test deleting label that's in use."""
         # Some APIs may succeed with warning, others may return error
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels/1",
+            url="https://donetick.test/api/v1/labels/1",
             json={"warning": "Label is in use by some chores"},
             method="DELETE",
         )
@@ -879,7 +878,7 @@ class TestDonetickClient:
     async def test_lookup_label_ids_all_found(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test label lookup when all labels exist."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={
                 "res": [
                     {"id": 1, "name": "cleaning", "color": "#FF5733"},
@@ -898,7 +897,7 @@ class TestDonetickClient:
     async def test_lookup_label_ids_partial_match(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test label lookup with some missing."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={
                 "res": [
                     {"id": 1, "name": "cleaning", "color": "#FF5733"},
@@ -916,7 +915,7 @@ class TestDonetickClient:
     async def test_lookup_label_ids_none_found(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test label lookup when no labels exist."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={"res": []},
         )
 
@@ -929,7 +928,7 @@ class TestDonetickClient:
     async def test_lookup_label_ids_empty_input(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test label lookup with empty array."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={"res": []},
         )
 
@@ -942,7 +941,7 @@ class TestDonetickClient:
     async def test_lookup_label_ids_case_insensitive(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test label lookup is case-insensitive."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={
                 "res": [
                     {"id": 1, "name": "Cleaning", "color": "#FF5733"},
@@ -967,7 +966,7 @@ class TestDonetickClient:
     async def test_get_circle_members_success(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test fetching circle members."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members/",
             json={
                 "res": [
                     {
@@ -1009,7 +1008,7 @@ class TestDonetickClient:
     async def test_get_circle_members_empty(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test handling empty circle."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members/",
             json={"res": []},
         )
 
@@ -1022,7 +1021,7 @@ class TestDonetickClient:
     async def test_lookup_user_ids_validation(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test username lookup with validation."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members/",
             json={
                 "res": [
                     {
@@ -1134,7 +1133,7 @@ class TestDonetickClient:
     async def test_json_decode_error_handling(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test handling malformed JSON response."""
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             content=b"Invalid JSON{{{",
             headers={"Content-Type": "application/json"},
         )
@@ -1153,7 +1152,7 @@ class TestDonetickClient:
         httpx_mock.add_exception(httpx.TimeoutException("Request timeout"))
         # Third attempt succeeds
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data],
         )
 
@@ -1167,13 +1166,13 @@ class TestDonetickClient:
         """Test retry on 500/502/503 errors."""
         # First attempt returns 500
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=500,
             json={"error": "Internal server error"},
         )
         # Second attempt succeeds
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data],
         )
 
@@ -1209,12 +1208,12 @@ class TestDonetickClient:
         ]
 
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/123/history",
+            url="https://donetick.test/api/v1/chores/123/history",
             json={"res": history_data},
         )
 
         client = DonetickClient(
-            base_url="https://test.donetick.com",
+            base_url="https://donetick.test",
             username="test",
             password="test",
         )
@@ -1256,12 +1255,12 @@ class TestDonetickClient:
         ]
 
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/history?limit=10&offset=5",
+            url="https://donetick.test/api/v1/chores/history?limit=10&offset=5",
             json={"res": history_data},
         )
 
         client = DonetickClient(
-            base_url="https://test.donetick.com",
+            base_url="https://donetick.test",
             username="test",
             password="test",
         )
@@ -1301,12 +1300,12 @@ class TestDonetickClient:
         }
 
         httpx_mock.add_response(
-            url="https://test.donetick.com/api/v1/chores/123/details",
+            url="https://donetick.test/api/v1/chores/123/details",
             json={"res": details_data},
         )
 
         client = DonetickClient(
-            base_url="https://test.donetick.com",
+            base_url="https://donetick.test",
             username="test",
             password="test",
         )

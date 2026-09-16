@@ -81,7 +81,7 @@ class TestMCPServer:
     async def test_list_chores_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login):
         """Test list_chores tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data],
         )
 
@@ -101,7 +101,7 @@ class TestMCPServer:
         inactive_chore["isActive"] = False
 
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[sample_chore_data, inactive_chore],
         )
 
@@ -115,7 +115,7 @@ class TestMCPServer:
     async def test_list_chores_empty(self, httpx_mock: HTTPXMock):
         """Test list_chores tool with no results."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[],
         )
 
@@ -128,7 +128,7 @@ class TestMCPServer:
     async def test_get_chore_tool(self, sample_chore_data, httpx_mock: HTTPXMock):
         """Test get_chore tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json=sample_chore_data,
         )
 
@@ -143,7 +143,7 @@ class TestMCPServer:
     async def test_get_chore_not_found(self, sample_chore_data, httpx_mock: HTTPXMock):
         """Test get_chore tool with non-existent ID."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/999",
+            url="https://donetick.test/api/v1/chores/999",
             status_code=404,
         )
 
@@ -157,13 +157,13 @@ class TestMCPServer:
         """Test create_chore tool execution."""
         # Mock POST response (API returns {'res': chore_id})
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json={"res": 1},
             method="POST",
         )
         # Mock GET response for fetching created chore
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json=sample_chore_data,
             method="GET",
         )
@@ -186,13 +186,13 @@ class TestMCPServer:
         """Test create_chore tool with only required fields."""
         # Mock POST response (API returns {'res': chore_id})
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json={"res": 1},
             method="POST",
         )
         # Mock GET response for fetching created chore
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json=sample_chore_data,
             method="GET",
         )
@@ -206,7 +206,7 @@ class TestMCPServer:
     async def test_complete_chore_tool(self, sample_chore_data, httpx_mock: HTTPXMock):
         """Test complete_chore tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1/do",
+            url="https://donetick.test/api/v1/chores/1/do",
             json=sample_chore_data,
             method="POST",
         )
@@ -221,7 +221,7 @@ class TestMCPServer:
     async def test_complete_chore_with_user(self, sample_chore_data, httpx_mock: HTTPXMock):
         """Test complete_chore tool with completed_by parameter."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1/do?completedBy=2",
+            url="https://donetick.test/api/v1/chores/1/do?completedBy=2",
             json=sample_chore_data,
             method="POST",
         )
@@ -235,7 +235,7 @@ class TestMCPServer:
     async def test_delete_chore_tool(self, httpx_mock: HTTPXMock):
         """Test delete_chore tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={},
             method="DELETE",
         )
@@ -250,7 +250,7 @@ class TestMCPServer:
         """Test update_chore_priority tool execution."""
         updated_chore = {**sample_chore_data, "priority": 4}
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1/priority",
+            url="https://donetick.test/api/v1/chores/1/priority",
             json=updated_chore,
             method="PUT",
         )
@@ -274,20 +274,20 @@ class TestMCPServer:
         """Test update_chore_assignee tool execution."""
         # Mock GET to fetch current chore (fetch-modify-send pattern)
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": sample_chore_data},
             method="GET",
         )
         # Mock PUT to update chore
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json={"message": "Chore added successfully"},
             method="PUT",
         )
         # Mock GET to fetch updated chore
         updated_chore = {**sample_chore_data, "assignedTo": 2, "assignees": [{"userId": 2}]}
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": updated_chore},
             method="GET",
         )
@@ -304,7 +304,7 @@ class TestMCPServer:
         # For a recurring chore, skip schedules next occurrence
         updated_chore = {**sample_chore_data, "nextDueDate": "2025-11-17"}
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1/skip",
+            url="https://donetick.test/api/v1/chores/1/skip",
             json=updated_chore,
             method="POST",
         )
@@ -321,7 +321,7 @@ class TestMCPServer:
         # Mock 3 retries for 500 error (client retries 3 times total)
         for _ in range(3):
             httpx_mock.add_response(
-                url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 status_code=500,
                 json={"error": "Internal server error"},
                 method="GET",
@@ -348,7 +348,7 @@ class TestMCPServer:
         # Mock multiple responses
         for _ in range(3):
             httpx_mock.add_response(
-                url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 json=[sample_chore_data],
             )
 
@@ -368,7 +368,7 @@ class TestMCPServer:
     async def test_list_labels_tool(self, httpx_mock: HTTPXMock, mock_login):
         """Test list_labels tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json=[
                 {"id": 1, "name": "cleaning", "color": "#80d8ff"},
                 {"id": 2, "name": "urgent", "color": "#ff5733"},
@@ -387,7 +387,7 @@ class TestMCPServer:
     async def test_list_labels_empty(self, httpx_mock: HTTPXMock, mock_login):
         """Test list_labels tool with no labels."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json=[],
         )
 
@@ -400,7 +400,7 @@ class TestMCPServer:
     async def test_create_label_tool(self, httpx_mock: HTTPXMock, mock_login):
         """Test create_label tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={"id": 1, "name": "outdoor", "color": "#4caf50"},
             method="POST",
         )
@@ -417,7 +417,7 @@ class TestMCPServer:
         """Test create_label tool with invalid color format."""
         # API rejects with 422 validation error
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             status_code=422,
             json={"error": "Invalid color format"},
             method="POST",
@@ -433,7 +433,7 @@ class TestMCPServer:
     async def test_update_label_tool(self, httpx_mock: HTTPXMock, mock_login):
         """Test update_label tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json={"res": {"id": 1, "name": "deep-cleaning", "color": "#00bcd4"}},
             method="PUT",
         )
@@ -448,7 +448,7 @@ class TestMCPServer:
     async def test_update_label_not_found(self, httpx_mock: HTTPXMock, mock_login):
         """Test update_label tool with non-existent label."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             status_code=404,
             method="PUT",
         )
@@ -463,7 +463,7 @@ class TestMCPServer:
     async def test_delete_label_tool(self, httpx_mock: HTTPXMock, mock_login):
         """Test delete_label tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/labels/1",
+            url="https://donetick.test/api/v1/labels/1",
             json={},
             method="DELETE",
         )
@@ -477,7 +477,7 @@ class TestMCPServer:
     async def test_delete_label_not_found(self, httpx_mock: HTTPXMock, mock_login):
         """Test delete_label tool with non-existent label."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/labels/999",
+            url="https://donetick.test/api/v1/labels/999",
             status_code=404,
             method="DELETE",
         )
@@ -495,7 +495,7 @@ class TestMCPServer:
     async def test_get_circle_members_tool(self, httpx_mock: HTTPXMock, mock_login):
         """Test get_circle_members tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members/",
             json=[
                 {
                     "id": 1,
@@ -533,7 +533,7 @@ class TestMCPServer:
     async def test_get_circle_members_formatting(self, httpx_mock: HTTPXMock, mock_login):
         """Test get_circle_members tool output formatting."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members/",
             json=[
                 {
                     "id": 1,
@@ -567,7 +567,7 @@ class TestMCPServer:
     async def test_list_circle_users_tool(self, httpx_mock: HTTPXMock, mock_login):
         """Test list_circle_users tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/users/",
+            url="https://donetick.test/api/v1/users/",
             json=[
                 {
                     "id": 1,
@@ -603,7 +603,7 @@ class TestMCPServer:
     async def test_list_circle_users_empty(self, httpx_mock: HTTPXMock, mock_login):
         """Test list_circle_users tool with no users."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/users/",
+            url="https://donetick.test/api/v1/users/",
             json=[],
         )
 
@@ -616,7 +616,7 @@ class TestMCPServer:
     async def test_get_user_profile_tool(self, httpx_mock: HTTPXMock, mock_login):
         """Test get_user_profile tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/users/profile",
+            url="https://donetick.test/api/v1/users/profile",
             json={
                 "id": 1,
                 "username": "testuser",
@@ -644,7 +644,7 @@ class TestMCPServer:
     async def test_get_user_profile_formatting(self, httpx_mock: HTTPXMock, mock_login):
         """Test get_user_profile tool output formatting."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/users/profile",
+            url="https://donetick.test/api/v1/users/profile",
             json={
                 "id": 1,
                 "username": "alice",
@@ -690,7 +690,7 @@ class TestMCPServer:
         """Test create_chore tool with non-existent usernames."""
         # Mock get_circle_members to return available users
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members/",
             json=[
                 {"id": 1, "userId": 1, "circleId": 1, "role": "member", "isActive": True, "username": "alice", "displayName": "Alice", "points": 0, "pointsRedeemed": 0},
                 {"id": 2, "userId": 2, "circleId": 1, "role": "member", "isActive": True, "username": "bob", "displayName": "Bob", "points": 0, "pointsRedeemed": 0},
@@ -715,7 +715,7 @@ class TestMCPServer:
         """Test create_chore tool with non-existent labels."""
         # Mock get_labels to return available labels
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/labels",
+            url="https://donetick.test/api/v1/labels",
             json=[
                 {"id": 1, "name": "cleaning"},
                 {"id": 2, "name": "urgent"},
@@ -752,7 +752,7 @@ class TestMCPServer:
         for strategy in strategies:
             # Mock POST response
             httpx_mock.add_response(
-                url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 json={"res": 1},
                 method="POST",
             )
@@ -760,7 +760,7 @@ class TestMCPServer:
             chore_response = sample_chore_data.copy()
             chore_response["assignStrategy"] = strategy
             httpx_mock.add_response(
-                url="https://donetick.jason1365.duckdns.org/api/v1/chores/1",
+                url="https://donetick.test/api/v1/chores/1",
                 json=chore_response,
                 method="GET",
             )
@@ -782,14 +782,14 @@ class TestMCPServer:
         # Valid priorities: 0, 1, 2, 3, 4
         for priority in [0, 1, 2, 3, 4]:
             httpx_mock.add_response(
-                url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 json={"res": 1},
                 method="POST",
             )
             chore_response = sample_chore_data.copy()
             chore_response["priority"] = priority
             httpx_mock.add_response(
-                url="https://donetick.jason1365.duckdns.org/api/v1/chores/1",
+                url="https://donetick.test/api/v1/chores/1",
                 json=chore_response,
                 method="GET",
             )
@@ -822,14 +822,14 @@ class TestMCPServer:
         """Test create_chore tool frequency transformation from natural language to API format."""
         # Test days_of_week transformation
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json={"res": 1},
             method="POST",
         )
         chore_response = sample_chore_data.copy()
         chore_response["frequencyType"] = "days_of_the_week"
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json=chore_response,
             method="GET",
         )
@@ -853,10 +853,10 @@ class TestMCPServer:
     @pytest.mark.asyncio
     async def test_http_401_authentication_error(self, httpx_mock: HTTPXMock, mock_login):
         """Test handling of 401 authentication errors."""
-        # Client retries 3 times on 401, so we need 3 mock responses
-        for _ in range(3):
+        # Client re-authenticates once on 401 and retries, then gives up
+        for _ in range(2):
             httpx_mock.add_response(
-                url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 status_code=401,
                 json={"error": "Unauthorized"},
             )
@@ -874,7 +874,7 @@ class TestMCPServer:
     async def test_http_403_forbidden_error(self, httpx_mock: HTTPXMock, mock_login):
         """Test handling of 403 forbidden errors."""
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1/do",
+            url="https://donetick.test/api/v1/chores/1/do",
             status_code=403,
             json={"error": "Forbidden"},
             method="POST",
@@ -892,7 +892,7 @@ class TestMCPServer:
         """Test user-friendly 404 error messages."""
         # Test for chore not found
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/999",
+            url="https://donetick.test/api/v1/chores/999",
             status_code=404,
         )
 
@@ -909,7 +909,7 @@ class TestMCPServer:
         # Pydantic validation will catch invalid dates before API call
         # So test with a valid date format but API rejects it
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=422,
             json={"error": "Validation error: invalid date"},
             method="POST",
@@ -933,13 +933,13 @@ class TestMCPServer:
         """Test that 400 errors show the actual API error message."""
         # Mock GET for fetch-modify-send pattern
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/1",
+            url="https://donetick.test/api/v1/chores/1",
             json={"res": sample_chore_data},
             method="GET",
         )
         # Mock PUT with specific API error
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=400,
             json={"error": "Assigned to not found in assignees"},
             method="PUT",
@@ -960,20 +960,20 @@ class TestMCPServer:
         # Mock retries (client retries 429 with backoff)
         # Provide 2 rate limit responses, then success
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=429,
             json={"error": "Too many requests"},
             headers={"Retry-After": "0.1"},  # Short wait to prevent test timeout
         )
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             status_code=429,
             json={"error": "Too many requests"},
             headers={"Retry-After": "0.1"},  # Short wait to prevent test timeout
         )
         # After retries, provide success response
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+            url="https://donetick.test/api/v1/chores/",
             json=[],
         )
 
@@ -989,7 +989,7 @@ class TestMCPServer:
         # Mock 3 retry attempts (client retries 500 errors)
         for _ in range(3):
             httpx_mock.add_response(
-                url="https://donetick.jason1365.duckdns.org/api/v1/chores/",
+                url="https://donetick.test/api/v1/chores/",
                 status_code=500,
                 json={"error": "Internal server error"},
             )
@@ -1031,7 +1031,7 @@ class TestMCPServer:
         ]
 
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/123/history",
+            url="https://donetick.test/api/v1/chores/123/history",
             json={"res": history_data},
         )
 
@@ -1072,7 +1072,7 @@ class TestMCPServer:
         ]
 
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/history?limit=50&offset=0",
+            url="https://donetick.test/api/v1/chores/history?limit=50&offset=0",
             json={"res": history_data},
         )
 
@@ -1115,7 +1115,7 @@ class TestMCPServer:
         }
 
         httpx_mock.add_response(
-            url="https://donetick.jason1365.duckdns.org/api/v1/chores/123/details",
+            url="https://donetick.test/api/v1/chores/123/details",
             json={"res": details_data},
         )
 
