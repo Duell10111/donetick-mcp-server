@@ -117,6 +117,55 @@ class TestChoreModels:
         assert detail.duration == 1800
 
 
+class TestListChores:
+    """Donetick omits inactive chores unless includeArchived=true."""
+
+    async def test_default_lists_active_chores(self, client, httpx_mock: HTTPXMock, login):
+        httpx_mock.add_response(url=CHORES_URL, json={"res": [CHORE]})
+
+        async with client:
+            chores = await client.list_chores()
+
+        assert [c.id for c in chores] == [1]
+
+    async def test_inactive_chores_request_archived(self, client, httpx_mock: HTTPXMock, login):
+        inactive = {**CHORE, "id": 2, "isActive": False}
+        httpx_mock.add_response(
+            url=f"{CHORES_URL}?includeArchived=true", json={"res": [CHORE, inactive]}
+        )
+
+        async with client:
+            chores = await client.list_chores(filter_active=False)
+
+        assert [c.id for c in chores] == [2]
+
+
+class TestCircleMembers:
+    """Donetick's route is /circles/members; a trailing slash is answered with 301."""
+
+    async def test_members_path_without_trailing_slash(self, client, httpx_mock: HTTPXMock, login):
+        httpx_mock.add_response(
+            url=f"{BASE_URL}/api/v1/circles/members",
+            json={
+                "res": [
+                    {
+                        "id": 1,
+                        "userId": 2,
+                        "circleId": 1,
+                        "role": "member",
+                        "isActive": True,
+                        "username": "",
+                        "displayName": "Konstantin",
+                    }
+                ]
+            },
+        )
+
+        async with client:
+            # Users without username are found by display name
+            assert await client.lookup_user_ids(["Konstantin"]) == {"Konstantin": 2}
+
+
 class TestUpdateChore:
     """Full chore updates via PUT /api/v1/chores/."""
 

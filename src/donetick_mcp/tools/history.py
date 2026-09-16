@@ -1,11 +1,25 @@
 """History and analytics tools."""
 
+import logging
 from typing import Annotated
 
 from mcp.server.mcpserver import Context, MCPServer
 from pydantic import Field
 
+from ..client import DonetickClient
 from ._common import HISTORY_STATUS_EMOJI, READ_ONLY, get_client, handle_errors
+
+logger = logging.getLogger(__name__)
+
+
+async def _chore_names(client: DonetickClient) -> dict[int, str]:
+    """Map chore IDs to names, since history entries only carry the chore ID."""
+    try:
+        chores = await client.list_chores(include_archived=True)
+    except Exception as e:
+        logger.warning(f"Could not fetch chore names for history: {e}")
+        return {}
+    return {chore.id: chore.name for chore in chores}
 
 
 def register(mcp: MCPServer) -> None:
@@ -59,13 +73,16 @@ def register(mcp: MCPServer) -> None:
         By default only your own entries are returned; set include_circle_members to include
         everyone in the circle.
         """
-        history = await get_client(ctx).get_all_chores_history(
+        client = get_client(ctx)
+        history = await client.get_all_chores_history(
             days=days, include_circle_members=include_circle_members
         )
         if not history:
             return f"No chore history found in the last {days} days"
 
-        # Group entries by chore; history entries only carry the chore ID
+        # Chores deleted since (or private chores of others) fall back to their ID
+        names = await _chore_names(client)
+
         by_chore: dict[int, list] = {}
         for entry in history:
             by_chore.setdefault(entry.choreId, []).append(entry)
@@ -78,7 +95,8 @@ def register(mcp: MCPServer) -> None:
                 completed_by = f"user {entry.completedBy}" if entry.completedBy else "Unknown"
                 completed_at = entry.performedAt or "Unknown"
                 entry_lines.append(f"  {status_emoji} {entry.status} {completed_at} by {completed_by}")
-            chore_sections.append(f"🏷️  Chore #{chore_id}\n" + "\n".join(entry_lines))
+            title = f"{names[chore_id]} (Chore #{chore_id})" if chore_id in names else f"Chore #{chore_id}"
+            chore_sections.append(f"🏷️  {title}\n" + "\n".join(entry_lines))
 
         return (
             f"📊 Chore History (last {days} days)\n"

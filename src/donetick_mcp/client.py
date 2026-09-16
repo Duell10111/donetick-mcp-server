@@ -474,19 +474,27 @@ class DonetickClient:
         self,
         filter_active: Optional[bool] = None,
         assigned_to_user_id: Optional[int] = None,
+        include_archived: bool = False,
     ) -> list[Chore]:
         """
-        List all chores with optional filtering.
+        List chores with optional filtering.
 
         Args:
-            filter_active: Filter by active status (None = all)
+            filter_active: None or True = active chores (Donetick's default),
+                False = inactive chores (archived and completed one-time chores)
             assigned_to_user_id: Filter by assigned user ID (None = all)
+            include_archived: Return active and inactive chores (ignored if filter_active is set)
 
         Returns:
             List of Chore objects
         """
         logger.info("Fetching chores list")
-        data = await self._request("GET", "/api/v1/chores/")
+        # Donetick only returns inactive chores with includeArchived=true
+        if filter_active is False or (include_archived and filter_active is None):
+            params = {"includeArchived": "true"}
+        else:
+            params = None
+        data = await self._request("GET", "/api/v1/chores/", params=params)
 
         # API returns {'res': [chores]} format
         chores_list = data.get('res', []) if isinstance(data, dict) else data
@@ -1446,7 +1454,7 @@ class DonetickClient:
             List of CircleMember objects
         """
         logger.info("Fetching circle members")
-        data = await self._request("GET", "/api/v1/circles/members/")
+        data = await self._request("GET", "/api/v1/circles/members")
 
         # API returns {'res': [...]} format
         members_data = data.get('res', data) if isinstance(data, dict) else data

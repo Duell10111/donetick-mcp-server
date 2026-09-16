@@ -77,7 +77,10 @@ def register(mcp: MCPServer) -> None:
         ctx: Context,
         filter_active: Annotated[
             bool | None,
-            Field(description="Filter by active status (true=active only, false=inactive only, null=all)"),
+            Field(
+                description="true or null = active chores (default), false = inactive chores "
+                "(archived chores and completed one-time chores)"
+            ),
         ] = None,
         assigned_to_user_id: Annotated[
             int | None, Field(description="Filter by assigned user ID (null=all users)")
@@ -90,9 +93,10 @@ def register(mcp: MCPServer) -> None:
             ),
         ] = "full",
     ) -> str:
-        """List all chores from Donetick.
+        """List chores from Donetick.
 
-        Optionally filter by active status or assigned user. Returns comprehensive chore details
+        Returns active chores by default; set filter_active=false for inactive ones.
+        Optionally filter by assigned user. Returns comprehensive chore details
         including name, description, due dates, assignees, and status. Use detail_level to control
         response size: 'brief' for essential fields only, 'full' for complete details (default).
         """

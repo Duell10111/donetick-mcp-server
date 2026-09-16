@@ -531,7 +531,7 @@ class TestMCPServer:
     async def test_get_circle_members_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test get_circle_members tool execution."""
         httpx_mock.add_response(
-            url="https://donetick.test/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members",
             json=[
                 {
                     "id": 1,
@@ -569,7 +569,7 @@ class TestMCPServer:
     async def test_get_circle_members_formatting(self, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test get_circle_members tool output formatting."""
         httpx_mock.add_response(
-            url="https://donetick.test/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members",
             json=[
                 {
                     "id": 1,
@@ -726,7 +726,7 @@ class TestMCPServer:
         """Test create_chore tool with non-existent usernames."""
         # Mock get_circle_members to return available users
         httpx_mock.add_response(
-            url="https://donetick.test/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members",
             json=[
                 {"id": 1, "userId": 1, "circleId": 1, "role": "member", "isActive": True, "username": "alice", "displayName": "Alice", "points": 0, "pointsRedeemed": 0},
                 {"id": 2, "userId": 2, "circleId": 1, "role": "member", "isActive": True, "username": "bob", "displayName": "Bob", "points": 0, "pointsRedeemed": 0},
@@ -1083,7 +1083,7 @@ class TestMCPServer:
         assert "2025-11-05T10:00:00Z" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_get_all_chores_history_tool(self, httpx_mock: HTTPXMock, mock_login, call_tool):
+    async def test_get_all_chores_history_tool(self, sample_chore_data, httpx_mock: HTTPXMock, mock_login, call_tool):
         """Test get_all_chores_history tool execution."""
         history_data = [
             {
@@ -1112,6 +1112,11 @@ class TestMCPServer:
             url="https://donetick.test/api/v1/chores/history?limit=7",
             json={"res": history_data},
         )
+        # Chore names are looked up including inactive chores
+        httpx_mock.add_response(
+            url="https://donetick.test/api/v1/chores/?includeArchived=true",
+            json={"res": [{**sample_chore_data, "id": 123, "name": "Empty dishwasher"}]},
+        )
 
         result = await call_tool("get_all_chores_history", {})
 
@@ -1120,9 +1125,9 @@ class TestMCPServer:
         assert "Chore History (last 7 days)" in result[0].text
         assert "skipped" in result[0].text
         assert "Showing 2 entries" in result[0].text
-        # Server displays "Chore #123" format (no chore names available in ChoreHistory)
-        assert "Chore #123" in result[0].text
-        assert "Chore #124" in result[0].text
+        assert "Empty dishwasher (Chore #123)" in result[0].text
+        # Chores that are not listed (e.g. deleted) fall back to their ID
+        assert "🏷️  Chore #124" in result[0].text
         # Server displays "user 1" format (user IDs, not usernames)
         assert "user 1" in result[0].text
         assert "user 2" in result[0].text

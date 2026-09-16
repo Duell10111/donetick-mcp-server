@@ -5,6 +5,18 @@ All notable changes to the Donetick MCP Server will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-09-16
+
+Fixes found while testing 0.5.0 against a live Donetick instance.
+
+### Fixed
+- **`get_circle_members` and assignment by username failed with `301 Moved Permanently`**: the client requested `/api/v1/circles/members/`, but the Donetick route has no trailing slash.
+- **`list_chores` with `filter_active=false` never returned chores**: Donetick omits inactive chores unless `includeArchived=true` is requested.
+
+### Changed
+- `get_all_chores_history` shows chore names next to the IDs.
+- Tool descriptions explain Donetick behavior: `undo_chore_action` clears the due date of one-time and thing-triggered chores, and archived chores include completed one-time chores.
+
 ## [0.5.0] - 2026-09-16
 
 Compatibility update for Donetick v0.1.79 and MCP SDK 2.x, including the Things API.

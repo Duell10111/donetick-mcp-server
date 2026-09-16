@@ -89,7 +89,8 @@ JWT via username/password only:
 Verify behavior against the Donetick source (`internal/chore/handler.go`, `internal/thing/handler.go`, `internal/auth/`) rather than assuming REST conventions.
 
 **Chores**
-- List endpoints need trailing slashes: `GET /api/v1/chores/`, `GET /api/v1/circles/members/`.
+- Paths must match the Gin routes exactly; a wrong trailing slash is answered with **301** (not followed by the client). With slash: `/api/v1/chores/`, `/api/v1/users/`. Without: `/api/v1/circles/members`, `/api/v1/labels`, `/api/v1/things`, `/api/v1/projects`.
+- `GET /api/v1/chores/` omits inactive chores (archived and completed one-time chores) unless `includeArchived=true`.
 - Create (`POST /api/v1/chores/`) returns `{"res": <id>}`; the client fetches the chore afterwards.
 - Dates are Go `time.Time`: only RFC3339 with timezone is accepted. The request field is `nextDueDate` (a `dueDate` field is silently ignored). Use `normalize_datetime()`.
 - `priority` must always be sent on create (Donetick dereferences it without nil check and panics).
@@ -101,6 +102,7 @@ Verify behavior against the Donetick source (`internal/chore/handler.go`, `inter
 - `PUT /{id}/assignee` only accepts users already in `assignees`, so `update_chore_assignee` uses the full update instead.
 - Optimistic locking: `updatedAt` in a request is compared with the stored value; the full update omits it (`FIELDS_TO_REMOVE`).
 - `frequencyType` values: `once daily weekly monthly yearly adaptive interval days_of_the_week day_of_the_month trigger no_repeat` (`interval_based` is mapped to `interval`). For `days_of_the_week`, the API returns partial `frequencyMetadata` but expects `unit`, `timezone`, `occurrences`, `weekNumbers` on update (added in `update_chore`).
+- `POST /{id}/undo` restores due date and assignee, but for `once`/`no_repeat`/`trigger` chores Donetick explicitly clears `nextDueDate` afterwards.
 - History: `GET /api/v1/chores/history?limit=<days>&members=true`; `status` is an integer (0 started, 1 completed, 2 skipped, 3 pending approval, 4 rejected, 5 missed, 6 rescheduled), note field is `notes`.
 - `GET /{id}/details` returns only a subset of chore fields (no `frequency`, `circleId`, timestamps).
 - Chore `status`: 0 none, 1 in progress, 2 paused, 3 pending approval.
@@ -110,7 +112,7 @@ Verify behavior against the Donetick source (`internal/chore/handler.go`, `inter
 - Things are private to their owner (`userID`), not shared with the circle.
 - Types `text`, `number` (integers), `boolean` (`"true"`/`"false"`); state is always a string. `action` exists in the model but fails validation.
 - `PUT /api/v1/things` has the ID in the body. There is no single-thing GET in the full API; `get_thing()` filters the list.
-- `PUT /{id}/state?value=...` evaluates triggers (`eq` default, `neq`, `gt/lt/gte/lte` numeric): matching chores **without due date** become due now. Donetick crashes on unknown IDs here, so the client checks the thing first.
+- `PUT /{id}/state?value=...` evaluates triggers (`eq` default, `neq`, `gt/lt/gte/lte` numeric): matching chores **without due date** become due now. Donetick crashes on unknown IDs here, so the client checks the thing first. This update does not bump the chore's `syncVersion` (Donetick bug), so sync-based apps may not see the new due date immediately.
 - The list endpoint does not include `thingChores`; the state update response does.
 - `GET /{id}/history?offset=` requires `offset`, returns 10 entries per page. `DELETE /{id}` returns 405 while chores are linked.
 - Create chores with triggers only after validating the thing (`build_thing_trigger()`): Donetick saves the chore before linking the thing and returns an error afterwards.

@@ -16,7 +16,10 @@ def register(mcp: MCPServer) -> None:
     @mcp.tool(annotations=READ_ONLY, structured_output=False)
     @handle_errors
     async def list_archived_chores(ctx: Context) -> str:
-        """List archived chores. Archived chores are hidden from list_chores' active chores."""
+        """List archived (inactive) chores.
+
+        Donetick archives chores by deactivating them, so completed one-time chores are listed too.
+        """
         chores = await get_client(ctx).list_archived_chores()
         if not chores:
             return "No archived chores found."
@@ -49,6 +52,8 @@ def register(mcp: MCPServer) -> None:
         """Undo your last completion, skip, approval submission or rejection of a chore.
 
         Restores the previous due date and assignee. Only works for your own action within 5 minutes.
+        Note: for one-time and thing-triggered chores Donetick reactivates the chore but clears its
+        due date; set it again with update_chore (next_due_date) if needed.
         """
         message, chore = await get_client(ctx).undo_chore_action(chore_id)
         return (

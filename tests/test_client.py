@@ -974,7 +974,7 @@ class TestDonetickClient:
     async def test_get_circle_members_success(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test fetching circle members."""
         httpx_mock.add_response(
-            url="https://donetick.test/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members",
             json={
                 "res": [
                     {
@@ -1016,7 +1016,7 @@ class TestDonetickClient:
     async def test_get_circle_members_empty(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test handling empty circle."""
         httpx_mock.add_response(
-            url="https://donetick.test/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members",
             json={"res": []},
         )
 
@@ -1029,7 +1029,7 @@ class TestDonetickClient:
     async def test_lookup_user_ids_validation(self, client, httpx_mock: HTTPXMock, mock_login):
         """Test username lookup with validation."""
         httpx_mock.add_response(
-            url="https://donetick.test/api/v1/circles/members/",
+            url="https://donetick.test/api/v1/circles/members",
             json={
                 "res": [
                     {
